@@ -64,6 +64,8 @@ app.use("*", logger());
 const INGEST_LOG_KEY = "ingest:log";
 const PATIENTS_INDEX_KEY = "patients:index";
 const PATIENTS_CACHE_KEY = "patients:all"; // Denormalized cache of all patients
+const EVAL_CACHE_PREFIX = "eval:"; // Prefix for evaluation cache keys
+const EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 // In-memory cache for the worker instance (survives across requests in same isolate)
 let patientsCache: { data: Patient[]; ts: number } | null = null;
@@ -758,11 +760,31 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
   }
 
   let requestedSpecialists: string[] | undefined;
+  let forceRefresh = false;
   try {
     const body = await c.req.json();
     requestedSpecialists = body.specialists;
+    forceRefresh = body.refresh === true;
   } catch {
     // No body or invalid JSON
+  }
+
+  // Check URL param for refresh
+  const url = new URL(c.req.url);
+  if (url.searchParams.get("refresh") === "true") {
+    forceRefresh = true;
+  }
+
+  // Generate cache key based on patient and specialists
+  const specialistIds = (requestedSpecialists || SPECIALISTS.map((s) => s.id)).sort().join(",");
+  const cacheKey = `${EVAL_CACHE_PREFIX}${patientId}:${specialistIds}`;
+
+  // Check cache unless forced refresh
+  if (!forceRefresh) {
+    const cached = await c.env.PATIENTS_KV.get(cacheKey, "json");
+    if (cached) {
+      return c.json({ ...cached as object, cached: true });
+    }
   }
 
   let openai: OpenAI;
@@ -918,7 +940,7 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
     // leave conflicts empty
   }
 
-  return c.json({
+  const response = {
     patientId,
     patient: {
       summary: patientSummary,
@@ -939,7 +961,14 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
       followUps: snapshotFollowUps(coordinator),
     },
     timestamp: new Date().toISOString(),
-  });
+  };
+
+  // Cache the result (fire and forget)
+  c.env.PATIENTS_KV.put(cacheKey, JSON.stringify(response), {
+    expirationTtl: EVAL_CACHE_TTL_SECONDS,
+  }).catch(() => {});
+
+  return c.json({ ...response, cached: false });
 });
 
 // Ingest

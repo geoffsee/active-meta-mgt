@@ -535,6 +535,8 @@
 
         <div class="actions">
           <button id="evaluate-btn">Evaluate Case</button>
+          <button id="refresh-btn" class="secondary" style="display:none;">Refresh (bypass cache)</button>
+          <span id="cache-indicator" style="display:none;font-size:11px;color:#86efac;margin-left:8px;"></span>
           <button id="export-btn" class="secondary">Export All (JSON)</button>
         </div>
       </div>
@@ -805,6 +807,8 @@
       renderEmptySpecialistCards();
       $('evaluate-btn').disabled = false;
       $('evaluate-btn').textContent = 'Evaluate Case';
+      $('refresh-btn').style.display = 'none';
+      $('cache-indicator').style.display = 'none';
       renderStructured(null);
 
       renderCaseList();
@@ -928,11 +932,16 @@
         : '<span class="none">NKDA (No Known Drug Allergies)</span>';
     }
 
-    $('evaluate-btn').addEventListener('click', async () => {
+    async function runEvaluation(forceRefresh = false) {
       if (!selectedPatient) return;
 
       const btn = $('evaluate-btn');
+      const refreshBtn = $('refresh-btn');
+      const cacheIndicator = $('cache-indicator');
+
       btn.disabled = true;
+      refreshBtn.style.display = 'none';
+      cacheIndicator.style.display = 'none';
       btn.textContent = 'Evaluating...';
 
       // Set all cards to loading state
@@ -941,8 +950,11 @@
       });
 
       try {
-        // Single request that fans out to all specialists on the server
-        const res = await fetch(`${API}/api/scenarios/generate/${selectedPatient.id}/evaluate`, {
+        const url = forceRefresh
+          ? `${API}/api/scenarios/generate/${selectedPatient.id}/evaluate?refresh=true`
+          : `${API}/api/scenarios/generate/${selectedPatient.id}/evaluate`;
+
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -967,6 +979,17 @@
 
           renderStructured(data.structured);
 
+          // Show cache indicator
+          if (data.cached) {
+            cacheIndicator.textContent = `Cached result from ${new Date(data.timestamp).toLocaleString()}`;
+            cacheIndicator.style.display = 'inline';
+            refreshBtn.style.display = 'inline-block';
+          } else {
+            cacheIndicator.textContent = 'Fresh evaluation';
+            cacheIndicator.style.display = 'inline';
+            refreshBtn.style.display = 'none';
+          }
+
           // Save evaluation
           evaluations.push({
             timestamp: new Date().toISOString(),
@@ -979,6 +1002,7 @@
             specialists: data.specialists,
             scenario: data.scenario,
             structured: data.structured,
+            cached: data.cached,
           });
 
           renderCaseList();
@@ -993,7 +1017,10 @@
 
       btn.textContent = 'Evaluate Again';
       btn.disabled = false;
-    });
+    }
+
+    $('evaluate-btn').addEventListener('click', () => runEvaluation(false));
+    $('refresh-btn').addEventListener('click', () => runEvaluation(true));
 
     $('export-btn').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(evaluations, null, 2)], { type: 'application/json' });
