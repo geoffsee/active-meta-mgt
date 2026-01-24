@@ -1,4 +1,5 @@
 import { types, flow, type Instance, type SnapshotIn, getSnapshot } from "mobx-state-tree";
+import { countTokensSync } from "./custom_tokenizer";
 
 /**
  * Active Meta-Context Management Framework (MST) — with:
@@ -194,7 +195,7 @@ const ContextWindow = types
             Object.assign(self.policy, patch);
         },
         setSelected(items: SnapshotIn<typeof ContextItemRef>[]) {
-            self.selected.replace(items as any);
+            self.selected.replace(items as Instance<typeof ContextItemRef>[]);
             self.lastRefreshedAt = new Date().toISOString();
         },
     }));
@@ -228,12 +229,12 @@ const ContextLane = types
             self.name = n;
         },
         setIncludeTagsAny(tags: SnapshotIn<typeof Tag>[]) {
-            self.includeTagsAny.replace(tags as any);
+            self.includeTagsAny.replace(tags as Instance<typeof Tag>[]);
         },
         pin(kind: Instance<typeof ContextItemKind>, id: string) {
             const existing = self.pinned.find((x) => x.kind === kind && x.id === id);
             if (existing) existing.pinned = true;
-            else self.pinned.push({ kind, id, pinned: true, score: 0 } as any);
+            else self.pinned.push({ kind, id, pinned: true, score: 0 });
         },
         unpin(kind: Instance<typeof ContextItemKind>, id: string) {
             const existing = self.pinned.find((x) => x.kind === kind && x.id === id);
@@ -263,7 +264,7 @@ const ArchiveEntry = types.model("ArchiveEntry", {
 
     // Snapshot of the framework state (optional but useful for rollback/audit)
     // Keep it small in production or store externally.
-    snapshot: types.frozen<any>(),
+    snapshot: types.frozen(),
 });
 
 /** ---------- Framework Root ---------- */
@@ -314,21 +315,24 @@ export const ActiveMetaContext = types
             return 1 / (1 + ageHours);
         };
 
-        const tagsMatchAny = (itemTags: { key: string; value?: string | null }[], any: any[]) => {
-            if (!any?.length) return true;
-            // match if any tag in `any` equals some tag on item (key+value)
-            return any.some((t: any) =>
+        const tagsMatchAny = (
+            itemTags: { key: string; value?: string | null }[],
+            matchTags: { key: string; value?: string | null }[]
+        ) => {
+            if (!matchTags?.length) return true;
+            // match if any tag in `matchTags` equals some tag on item (key+value)
+            return matchTags.some((t) =>
                 itemTags.some((it) => it.key === t.key && (t.value == null || it.value === t.value))
             );
         };
 
-        function getItemTags(kind: Instance<typeof ContextItemKind>, id: string): typeof Tag[] {
-            if (kind === "goal") return (self.goals.get(id)?.tags ?? []) as any;
-            if (kind === "constraint") return (self.constraints.get(id)?.tags ?? []) as any;
-            if (kind === "assumption") return (self.assumptions.get(id)?.tags ?? []) as any;
-            if (kind === "evidence") return (self.evidence.get(id)?.tags ?? []) as any;
-            if (kind === "question") return (self.questions.get(id)?.tags ?? []) as any;
-            if (kind === "decision") return (self.decisions.get(id)?.tags ?? []) as any;
+        function getItemTags(kind: Instance<typeof ContextItemKind>, id: string): Instance<typeof Tag>[] {
+            if (kind === "goal") return self.goals.get(id)?.tags ?? [];
+            if (kind === "constraint") return self.constraints.get(id)?.tags ?? [];
+            if (kind === "assumption") return self.assumptions.get(id)?.tags ?? [];
+            if (kind === "evidence") return self.evidence.get(id)?.tags ?? [];
+            if (kind === "question") return self.questions.get(id)?.tags ?? [];
+            if (kind === "decision") return self.decisions.get(id)?.tags ?? [];
             return [];
         }
 
@@ -439,8 +443,11 @@ export const ActiveMetaContext = types
             self.updatedAt = new Date().toISOString();
         };
 
-        const upsertMapItem = (map: any, item: SnapshotIn<any>) => {
-            map.set(item.id, item as any);
+        const upsertMapItem = <T extends { id: string }>(
+            map: { set: (key: string, value: T) => void },
+            item: T
+        ) => {
+            map.set(item.id, item);
             touch();
         };
 
@@ -460,14 +467,14 @@ export const ActiveMetaContext = types
 
             const candidates: SnapshotIn<typeof ContextItemRef>[] = [];
 
-            for (const kind of includeKinds as any) {
+            for (const kind of includeKinds) {
                 const ids = self.getAllIdsByKind(kind);
                 for (const id of ids) {
                     if (!self.isActive(kind, id) && kind !== "evidence") continue;
 
                     // tag gating per lane
                     const itemTags = self.getItemTags(kind, id);
-                    if (!self.tagsMatchAny(itemTags as any, lane.includeTagsAny as any)) continue;
+                    if (!self.tagsMatchAny(itemTags, lane.includeTagsAny)) continue;
 
                     if (pinned.some((p) => p.kind === kind && p.id === id)) continue;
 
@@ -501,8 +508,8 @@ export const ActiveMetaContext = types
             return Array.from(map.values());
         };
 
-        // rough "tokens" proxy; swap for real tokenizer later
-        const approxTokens = (s: string) => Math.ceil(s.length / 4);
+        // Use BERT tokenizer for accurate token counting
+        const approxTokens = (s: string) => countTokensSync(s);
 
         const truncateToTokenBudget = (text: string, tokenBudget: number) => {
             // cheap: trim chars to fit budget using approxTokens
@@ -564,10 +571,10 @@ export const ActiveMetaContext = types
             const archiveId = `arch_${Date.now()}_${Math.random().toString(16).slice(2)}`;
             self.archive.push({
                 id: archiveId,
-                mergedSelected: merged as any,
+                mergedSelected: merged,
                 workingMemoryText: workingText,
                 snapshot: getSnapshot(self),
-            } as any);
+            });
             return archiveId;
         };
 
@@ -611,7 +618,7 @@ export const ActiveMetaContext = types
             /** ---- Lanes ---- */
             ensureLane(id: string, name?: string) {
                 if (!self.lanes.has(id)) {
-                    self.lanes.set(id, { id, name: name ?? id } as any);
+                    self.lanes.set(id, { id, name: name ?? id });
                 } else if (name) {
                     self.lanes.get(id)!.setName(name);
                 }
@@ -661,7 +668,7 @@ export const ActiveMetaContext = types
 
                 const mergedRaw: SnapshotIn<typeof ContextItemRef>[] = [];
                 for (const lane of enabled) {
-                    for (const r of lane.window.selected) mergedRaw.push(getSnapshot(r) as any);
+                    for (const r of lane.window.selected) mergedRaw.push(getSnapshot(r));
                 }
 
                 let merged = uniqByKindIdKeepMaxScore(mergedRaw);
@@ -691,10 +698,10 @@ export const ActiveMetaContext = types
                 tokenBudget?: number;
                 archiveRawItems?: boolean;
             }) {
-                const tokenBudget = options?.tokenBudget ?? 600; // a “small” working memory note
+                const tokenBudget = options?.tokenBudget ?? 600; // a "small" working memory note
                 const archiveRawItems = options?.archiveRawItems ?? false;
 
-                const selected = self.activeWindow.selected.map((x) => getSnapshot(x) as any);
+                const selected = self.activeWindow.selected.map((x) => getSnapshot(x));
                 const wm = makeWorkingMemory(selected, tokenBudget);
 
                 const archiveId = archiveSelectedRefs(selected, wm);
@@ -777,8 +784,13 @@ export const ActiveMetaContext = types
                 upsertMapItem(self.evidence, e);
 
                 // Call synchronous actions directly in the flow
-                // Note: We need to use a workaround to access sibling actions
-                const actions = self as any;
+                // Type assertion needed to access sibling actions within a flow
+                type SelfWithActions = typeof self & {
+                    refreshAllLanes: () => void;
+                    mergeLanesToActiveWindow: () => void;
+                    synthesizeWorkingMemory: (options?: { tokenBudget?: number; archiveRawItems?: boolean }) => void;
+                };
+                const actions = self as SelfWithActions;
 
                 if (opts?.synthesize) {
                     actions.refreshAllLanes();

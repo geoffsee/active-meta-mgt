@@ -13,5 +13,8 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1"
   }
 }

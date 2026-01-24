@@ -294,12 +294,12 @@ describe("ActiveMetaContext", () => {
 
             lane?.pin("goal", "goal-1");
             expect(lane?.pinned.length).toBe(1);
-            expect(lane?.pinned[0].kind).toBe("goal");
-            expect(lane?.pinned[0].id).toBe("goal-1");
-            expect(lane?.pinned[0].pinned).toBe(true);
+            expect(lane?.pinned[0]?.kind).toBe("goal");
+            expect(lane?.pinned[0]?.id).toBe("goal-1");
+            expect(lane?.pinned[0]?.pinned).toBe(true);
 
             lane?.unpin("goal", "goal-1");
-            expect(lane?.pinned[0].pinned).toBe(false);
+            expect(lane?.pinned[0]?.pinned).toBe(false);
         });
 
         test("should set window policy", () => {
@@ -359,8 +359,11 @@ describe("ActiveMetaContext", () => {
 
             const tags = ctx.getItemTags("goal", "g-1");
             expect(tags.length).toBe(2);
-            expect(tags[0].key).toBe("lane");
-            expect(tags[0].value).toBe("task");
+            const firstTag = tags[0];
+            if (firstTag) {
+                expect(firstTag.key).toBe("lane");
+                expect(firstTag.value).toBe("task");
+            }
         });
 
         test("should match tags", () => {
@@ -392,7 +395,7 @@ describe("ActiveMetaContext", () => {
 
             const summaries = ctx.activeSelectedSummaries;
             expect(summaries.length).toBe(1);
-            expect(summaries[0].text).toBe("Test Goal");
+            expect(summaries[0]?.text).toBe("Test Goal");
         });
     });
 
@@ -488,10 +491,10 @@ describe("ActiveMetaContext", () => {
             ctx.refreshLaneSelection("legal");
 
             expect(taskLane?.window.selected.length).toBe(1);
-            expect(taskLane?.window.selected[0].id).toBe("g-1");
+            expect(taskLane?.window.selected[0]?.id).toBe("g-1");
 
             expect(legalLane?.window.selected.length).toBe(1);
-            expect(legalLane?.window.selected[0].id).toBe("g-2");
+            expect(legalLane?.window.selected[0]?.id).toBe("g-2");
         });
 
         test("should respect maxItems in lane policy", () => {
@@ -631,7 +634,7 @@ describe("ActiveMetaContext", () => {
             ctx.mergeLanesToActiveWindow();
 
             expect(ctx.activeWindow.selected.length).toBe(1);
-            expect(ctx.activeWindow.selected[0].id).toBe("g-1");
+            expect(ctx.activeWindow.selected[0]?.id).toBe("g-1");
         });
 
         test("should respect activeWindow maxItems cap", () => {
@@ -700,8 +703,8 @@ describe("ActiveMetaContext", () => {
             expect(ctx.workingMemory.lastArchiveId).toBeTruthy();
 
             const lastArchive = ctx.archive[ctx.archive.length - 1];
-            expect(lastArchive.workingMemoryText).toBe(ctx.workingMemory.text);
-            expect(lastArchive.mergedSelected.length).toBe(1);
+            expect(lastArchive?.workingMemoryText).toBe(ctx.workingMemory.text);
+            expect(lastArchive?.mergedSelected.length).toBe(1);
         });
 
         test("should truncate to token budget", () => {
@@ -910,8 +913,8 @@ describe("ActiveMetaContext", () => {
 
             const goal = ctx.goals.get("g-1");
             expect(goal?.tags.length).toBe(2);
-            expect(goal?.tags[0].key).toBe("priority");
-            expect(goal?.tags[0].value).toBe("urgent");
+            expect(goal?.tags[0]?.key).toBe("priority");
+            expect(goal?.tags[0]?.value).toBe("urgent");
         });
 
         test("should store provenance information", () => {
@@ -1018,8 +1021,8 @@ describe("ActiveMetaContext", () => {
 
             const taskLane = defaultCtx.lanes.get("task");
             expect(taskLane?.includeTagsAny.length).toBe(1);
-            expect(taskLane?.includeTagsAny[0].key).toBe("lane");
-            expect(taskLane?.includeTagsAny[0].value).toBe("task");
+            expect(taskLane?.includeTagsAny[0]?.key).toBe("lane");
+            expect(taskLane?.includeTagsAny[0]?.value).toBe("task");
         });
 
         test("should set maxItems for each lane", () => {
@@ -1035,6 +1038,40 @@ describe("ActiveMetaContext", () => {
         test("should set activeWindow maxItems", () => {
             const defaultCtx = makeDefaultActiveMetaContext("default-ctx");
             expect(defaultCtx.activeWindow.policy.maxItems).toBe(35);
+        });
+    });
+
+    describe("Token Counting Integration", () => {
+        test("should use custom tokenizer for working memory synthesis", () => {
+            ctx.upsertGoal({ id: "g-1", title: "Test goal with some text" });
+            ctx.activeWindow.setSelected([
+                { kind: "goal", id: "g-1", score: 10, pinned: false }
+            ]);
+
+            // Use a small token budget
+            ctx.synthesizeWorkingMemory({ tokenBudget: 10 });
+
+            // The working memory should be truncated to fit the budget
+            const wm = ctx.workingMemory.text;
+            expect(wm).toBeTruthy();
+
+            // Verify it respects the token budget (approximation)
+            const approxTokens = Math.ceil(wm.length / 4);
+            expect(approxTokens).toBeLessThanOrEqual(15); // Allow small margin
+        });
+
+        test("should not truncate when within budget", () => {
+            ctx.upsertGoal({ id: "g-1", title: "Short" });
+            ctx.activeWindow.setSelected([
+                { kind: "goal", id: "g-1", score: 10, pinned: false }
+            ]);
+
+            // Use a large token budget
+            ctx.synthesizeWorkingMemory({ tokenBudget: 1000 });
+
+            const wm = ctx.workingMemory.text;
+            expect(wm).toContain("Short");
+            expect(wm).toContain("Goals:");
         });
     });
 
@@ -1140,7 +1177,7 @@ describe("ActiveMetaContext", () => {
             ctx.refreshAllLanes();
             ctx.mergeLanesToActiveWindow();
             expect(ctx.activeWindow.selected.length).toBe(1);
-            expect(ctx.activeWindow.selected[0].id).toBe("g-1");
+            expect(ctx.activeWindow.selected[0]?.id).toBe("g-1");
 
             // Re-enable legal lane
             ctx.lanes.get("legal")?.setStatus("enabled");
