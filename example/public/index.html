@@ -23,8 +23,26 @@
       height: 100vh;
       position: sticky;
       top: 0;
+      min-width: 180px;
+      max-width: 500px;
+      position: relative;
     }
-    aside h1 { font-size: 12px; color: #666; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .resize-handle {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 5px;
+      height: 100%;
+      cursor: ew-resize;
+      background: transparent;
+      transition: background 0.2s;
+    }
+    .resize-handle:hover,
+    .resize-handle.dragging {
+      background: #f6c343;
+    }
+    aside h1 { font-size: 12px; color: #666; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 8px; }
+    .demo-badge { background: #f6c343; color: #000; font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 700; letter-spacing: 0.05em; }
     .case-list { list-style: none; }
     .case-list li {
       padding: 8px 10px;
@@ -343,6 +361,60 @@
 
     .empty { color: #666; text-align: center; padding: 60px; }
 
+    .data-info {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 13px;
+    }
+    .data-info summary {
+      padding: 12px 16px;
+      cursor: pointer;
+      color: #8b949e;
+      font-weight: 500;
+    }
+    .data-info summary:hover { color: #c9d1d9; }
+    .data-info[open] summary { border-bottom: 1px solid #21262d; }
+    .data-info-content {
+      padding: 16px;
+      color: #8b949e;
+      line-height: 1.5;
+    }
+    .data-info-content p { margin-bottom: 12px; }
+    .source-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 12px;
+    }
+    .source-table th, .source-table td {
+      padding: 8px 10px;
+      text-align: left;
+      border-bottom: 1px solid #21262d;
+    }
+    .source-table th {
+      background: #161b22;
+      color: #c9d1d9;
+      font-weight: 600;
+    }
+    .source-table td { color: #8b949e; }
+    .source-table a { color: #f6c343; text-decoration: none; }
+    .source-table a:hover { text-decoration: underline; }
+    .data-note {
+      font-size: 12px;
+      color: #f6c343;
+      font-style: normal;
+      font-weight: 500;
+      margin-top: 16px;
+      margin-bottom: 0;
+      padding: 12px 14px;
+      background: rgba(246, 195, 67, 0.1);
+      border: 1px solid rgba(246, 195, 67, 0.3);
+      border-radius: 6px;
+      text-align: center;
+    }
+
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
@@ -351,12 +423,53 @@
   </style>
 </head>
 <body>
-  <aside>
-    <h1>Cases (<span id="case-count">0</span>)</h1>
+  <aside id="sidebar">
+    <h1>Cases (<span id="case-count">0</span>) <span class="demo-badge">Demo</span></h1>
     <ul class="case-list" id="case-list"></ul>
+    <div class="resize-handle" id="resize-handle"></div>
   </aside>
 
   <main>
+    <details class="data-info" open>
+      <summary>About This Dataset</summary>
+      <div class="data-info-content">
+        <p>
+          Patient records are created by combining multiple healthcare datasets.
+          Records are matched by demographics (age group, gender) and condition type,
+          then merged to create realistic clinical scenarios with complete vitals and lab values.
+        </p>
+        <table class="source-table">
+          <thead>
+            <tr><th>Source</th><th>Data Provided</th><th>License</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="https://physionet.org/content/mimiciii/" target="_blank">MIMIC-III</a></td>
+              <td>Patient demographics, diagnoses (ICD-9), medications, chemistry labs</td>
+              <td>PhysioNet Credentialed</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.kaggle.com/datasets" target="_blank">Oxygen Dataset</a></td>
+              <td>Vital signs (SpO2, heart rate, oxygen flow), critical status</td>
+              <td>CC0 Public Domain</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.kaggle.com/datasets" target="_blank">Healthcare Dataset</a></td>
+              <td>Demographics, insurance, blood type</td>
+              <td>CC0 Public Domain</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.kaggle.com/datasets" target="_blank">CBC Dataset</a></td>
+              <td>Complete blood count (WBC, RBC, hemoglobin, platelets, differentials)</td>
+              <td>CC0 Public Domain</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="data-note">
+          Records are synthetic composites for demonstration purposes. No real patient data is displayed.
+        </p>
+      </div>
+    </details>
     <div class="stats" id="stats"></div>
     <div class="empty" id="empty-state">Select a case to evaluate</div>
 
@@ -451,6 +564,36 @@
     const findingsCount = $('findings-count');
     const conflictsCount = $('conflicts-count');
     const followupsCount = $('followups-count');
+
+    // Sidebar resize
+    const sidebar = $('sidebar');
+    const resizeHandle = $('resize-handle');
+    let isResizing = false;
+
+    resizeHandle.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      resizeHandle.classList.add('dragging');
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const newWidth = e.clientX;
+      if (newWidth >= 180 && newWidth <= 500) {
+        sidebar.style.width = newWidth + 'px';
+        document.body.style.gridTemplateColumns = newWidth + 'px 1fr';
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isResizing) {
+        isResizing = false;
+        resizeHandle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    });
 
     // Simple markdown parser
     function renderMarkdown(text) {
