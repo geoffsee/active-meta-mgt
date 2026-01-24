@@ -1,0 +1,19 @@
+{
+  "name": "active-meta-mgt-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/server.ts",
+    "start": "bun run src/server.ts",
+    "probe": "bun run src/main.ts"
+  },
+  "dependencies": {
+    "active-meta-mgt": "file:..",
+    "csv-parse": "^6.1.0",
+    "openai": "^4.31.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.2"
+  }
+}

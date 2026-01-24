@@ -77,6 +77,24 @@ const payload = ctx.buildLLMContextPayload();
 console.log(payload.workingMemory.text);
 ```
 
+## Runnable example (OpenAI + HTTP API)
+
+A minimal Bun server lives in `example/` to demonstrate how the library can seed context lanes, synthesize working memory, and call the OpenAI SDK.
+
+```bash
+cd example
+bun install
+export OPENAI_API_KEY=sk-...
+bun run src/server.ts
+```
+
+Endpoints:
+- `GET /scenarios` — list preset demo cases
+- `GET /scenarios/:id/context` — inspect lane selections + working memory
+- `POST /scenarios/:id/llm` — send working memory to OpenAI and return the response
+
+See `example/README.md` for details and how to add your own scenarios.
+
 ## Core Concepts
 
 ### Knowledge Objects
