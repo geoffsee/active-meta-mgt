@@ -66,6 +66,44 @@ const PATIENTS_INDEX_KEY = "patients:index";
 const PATIENTS_CACHE_KEY = "patients:all"; // Denormalized cache of all patients
 const EVAL_CACHE_PREFIX = "eval:"; // Prefix for evaluation cache keys
 const EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+const EVAL_COOLDOWN_PREFIX = "cooldown:"; // Prefix for rate limit cooldown keys
+const PATIENT_EVAL_COOLDOWN_SECONDS = 4 * 60 * 60; // 4 hours cooldown per patient
+
+async function checkPatientCooldown(
+  kv: Env["PATIENTS_KV"],
+  patientId: string
+): Promise<{ allowed: boolean; remainingSeconds: number }> {
+  const key = `${EVAL_COOLDOWN_PREFIX}${patientId}`;
+  const record = await kv.get<{ timestamp: number }>(key, "json");
+
+  if (!record) {
+    return { allowed: true, remainingSeconds: 0 };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const elapsed = now - record.timestamp;
+
+  if (elapsed >= PATIENT_EVAL_COOLDOWN_SECONDS) {
+    return { allowed: true, remainingSeconds: 0 };
+  }
+
+  return {
+    allowed: false,
+    remainingSeconds: PATIENT_EVAL_COOLDOWN_SECONDS - elapsed,
+  };
+}
+
+async function recordPatientEvaluation(
+  kv: Env["PATIENTS_KV"],
+  patientId: string
+): Promise<void> {
+  const key = `${EVAL_COOLDOWN_PREFIX}${patientId}`;
+  await kv.put(
+    key,
+    JSON.stringify({ timestamp: Math.floor(Date.now() / 1000) }),
+    { expirationTtl: PATIENT_EVAL_COOLDOWN_SECONDS }
+  );
+}
 
 // In-memory cache for the worker instance (survives across requests in same isolate)
 let patientsCache: { data: Patient[]; ts: number } | null = null;
@@ -759,6 +797,23 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
     return c.json({ error: `Patient ${patientId} not found` }, 404);
   }
 
+  // Check per-patient rate limit (cooldown)
+  const cooldown = await checkPatientCooldown(c.env.PATIENTS_KV, patientId);
+  if (!cooldown.allowed) {
+    return c.json(
+      {
+        error: "Rate limited",
+        message: `Patient ${patientId} was recently evaluated. Please wait ${cooldown.remainingSeconds} seconds before re-evaluating.`,
+        retryAfter: cooldown.remainingSeconds,
+        patientId,
+      },
+      {
+        status: 429,
+        headers: { "Retry-After": String(cooldown.remainingSeconds) },
+      }
+    );
+  }
+
   let requestedSpecialists: string[] | undefined;
   let forceRefresh = false;
   try {
@@ -963,7 +1018,8 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
     timestamp: new Date().toISOString(),
   };
 
-  // Cache the result (fire and forget)
+  // Record evaluation for rate limiting and cache the result (fire and forget)
+  recordPatientEvaluation(c.env.PATIENTS_KV, patientId).catch(() => {});
   c.env.PATIENTS_KV.put(cacheKey, JSON.stringify(response), {
     expirationTtl: EVAL_CACHE_TTL_SECONDS,
   }).catch(() => {});

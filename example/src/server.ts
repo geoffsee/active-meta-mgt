@@ -36,6 +36,38 @@ import {
 
 const port = Number(process.env.PORT ?? process.env.BUN_PORT ?? 3333);
 const publicDir = new URL("../public/", import.meta.url);
+
+// Rate limiting: per-patient cooldown to prevent rapid re-evaluation
+const PATIENT_EVAL_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours cooldown per patient
+const patientEvalTimestamps = new Map<string, number>();
+
+function checkPatientCooldown(patientId: string): { allowed: boolean; remainingMs: number } {
+  const now = Date.now();
+  const lastEval = patientEvalTimestamps.get(patientId);
+
+  if (!lastEval) {
+    return { allowed: true, remainingMs: 0 };
+  }
+
+  const elapsed = now - lastEval;
+  if (elapsed >= PATIENT_EVAL_COOLDOWN_MS) {
+    return { allowed: true, remainingMs: 0 };
+  }
+
+  return { allowed: false, remainingMs: PATIENT_EVAL_COOLDOWN_MS - elapsed };
+}
+
+function recordPatientEvaluation(patientId: string): void {
+  patientEvalTimestamps.set(patientId, Date.now());
+
+  // Cleanup old entries to prevent memory leaks (keep last 1000)
+  if (patientEvalTimestamps.size > 1000) {
+    const entries = [...patientEvalTimestamps.entries()];
+    entries.sort((a, b) => a[1] - b[1]);
+    const toRemove = entries.slice(0, entries.length - 1000);
+    toRemove.forEach(([id]) => patientEvalTimestamps.delete(id));
+  }
+}
 const publicDirFallback = new URL("./example/public/", `file://${process.cwd()}/`);
 async function resolvePublicFile(path: string): Promise<{ file: Blob; url: URL }> {
   const primaryUrl = new URL(path, publicDir);
@@ -367,6 +399,24 @@ Bun.serve({
         const patient = getPatient(patientId);
         if (!patient) return notFound(`Patient ${patientId} not found`);
 
+        // Check per-patient rate limit (cooldown)
+        const cooldown = checkPatientCooldown(patientId);
+        if (!cooldown.allowed) {
+          const remainingSec = Math.ceil(cooldown.remainingMs / 1000);
+          return json(
+            {
+              error: "Rate limited",
+              message: `Patient ${patientId} was recently evaluated. Please wait ${remainingSec} seconds before re-evaluating.`,
+              retryAfter: remainingSec,
+              patientId,
+            },
+            {
+              status: 429,
+              headers: { "Retry-After": String(remainingSec) },
+            }
+          );
+        }
+
         // Parse request body for optional specialist filter
         let requestedSpecialists: string[] | undefined;
         try {
@@ -543,6 +593,9 @@ Bun.serve({
         } catch {
           // leave conflicts empty on failure
         }
+
+        // Record successful evaluation for rate limiting
+        recordPatientEvaluation(patientId);
 
         return json({
           patientId,

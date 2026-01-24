@@ -1065,7 +1065,27 @@
 
         const data = await res.json();
 
-        if (data.error) {
+        if (res.status === 429) {
+          // Rate limited - show cooldown message
+          const mins = Math.ceil((data.retryAfter || 0) / 60);
+          const hrs = Math.floor(mins / 60);
+          const remainMins = mins % 60;
+          const timeStr = hrs > 0 ? `${hrs}h ${remainMins}m` : `${mins}m`;
+          specialists.forEach(s => {
+            updateSpecialistCard(s.id, {
+              status: 'error',
+              error: `Rate limited: wait ${timeStr} before re-evaluating this patient`
+            });
+          });
+          renderStructured(null);
+          btn.textContent = `Cooldown (${timeStr})`;
+          btn.disabled = true;
+          // Re-enable button after cooldown
+          setTimeout(() => {
+            btn.textContent = 'Evaluate Case';
+            btn.disabled = false;
+          }, (data.retryAfter || 60) * 1000);
+        } else if (data.error) {
           specialists.forEach(s => {
             updateSpecialistCard(s.id, { status: 'error', error: data.error });
           });
