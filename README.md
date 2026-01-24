@@ -19,13 +19,17 @@ This framework provides a structured approach to managing contextual information
 ## Installation
 
 ```bash
-bun install
+npm install active-meta-mgt
+# or
+bun add active-meta-mgt
+# or
+yarn add active-meta-mgt
 ```
 
 ## Quick Start
 
 ```typescript
-import { makeDefaultActiveMetaContext } from "./index";
+import { makeDefaultActiveMetaContext } from "active-meta-mgt";
 
 // 1. Create a context for a patient encounter
 const ctx = makeDefaultActiveMetaContext("encounter-12345");
@@ -162,7 +166,7 @@ ctx.synthesizeWorkingMemory({ tokenBudget: 600 });
 ### Context Creation
 
 ```typescript
-import { ActiveMetaContext, makeDefaultActiveMetaContext } from "./index";
+import { ActiveMetaContext, makeDefaultActiveMetaContext } from "active-meta-mgt";
 
 // With default lanes
 const ctx = makeDefaultActiveMetaContext("patient-encounter-id");
@@ -333,7 +337,7 @@ ctx.activeSelectedSummaries  // Selected items with text summaries
 The framework provides two token counting strategies:
 
 ```typescript
-import { countTokens, countTokensSync } from "./custom_tokenizer";
+import { countTokens, countTokensSync } from "active-meta-mgt/tokenizer";
 
 // Async - accurate BERT tokenization (HuggingFace transformers)
 const tokens = await countTokens("Patient presents with chest pain...");

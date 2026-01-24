@@ -1,6 +1,9 @@
 import { types, flow, type Instance, type SnapshotIn, getSnapshot } from "mobx-state-tree";
 import { countTokensSync } from "./custom_tokenizer";
 
+// Re-export MST types for consumers
+export { types, type Instance, type SnapshotIn } from "mobx-state-tree";
+
 /**
  * Active Meta-Context Management Framework (MST) — with:
  *  1) Context lanes (task/legal/personal/threat-model/implementation/…)

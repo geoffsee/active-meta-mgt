@@ -1,20 +1,56 @@
 {
   "name": "active-meta-mgt",
-  "module": "index.ts",
+  "version": "0.1.0",
+  "description": "Token-budgeted context management framework with MobX-State-Tree for organizing knowledge objects across multiple context lanes",
+  "author": "Geoff Seemueller",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/williamseemueller/active-meta-mgt.git"
+  },
+  "keywords": [
+    "context-management",
+    "mobx-state-tree",
+    "mst",
+    "llm",
+    "token-budget",
+    "knowledge-management"
+  ],
   "type": "module",
-  "private": true,
-  "devDependencies": {
-    "@types/bun": "latest",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./index.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./index.ts"
+    },
+    "./tokenizer": {
+      "import": "./dist/custom_tokenizer.js",
+      "types": "./custom_tokenizer.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "index.ts",
+    "custom_tokenizer.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun build ./index.ts ./custom_tokenizer.ts --outdir ./dist --target node --external mobx-state-tree --external @huggingface/transformers",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "mobx-state-tree": "^7.0.2"
   },
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "bun test"
+  "devDependencies": {
+    "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
-  },
-  "dependencies": {
-    "@huggingface/transformers": "^3.8.1"
   }
 }
