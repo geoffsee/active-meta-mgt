@@ -244,6 +244,118 @@ function badRequest(message = "Bad request") {
   return json({ error: message }, { status: 400 });
 }
 
+// =============================================================================
+// Request Logging
+// =============================================================================
+
+type LogLevel = "info" | "warn" | "error";
+
+interface RequestLog {
+  timestamp: string;
+  method: string;
+  path: string;
+  status: number;
+  durationMs: number;
+  ip: string;
+  userAgent: string;
+}
+
+const requestLogs: RequestLog[] = [];
+const MAX_REQUEST_LOGS = 10000;
+
+function colorStatus(status: number): string {
+  if (status >= 500) return `\x1b[31m${status}\x1b[0m`; // red
+  if (status >= 400) return `\x1b[33m${status}\x1b[0m`; // yellow
+  if (status >= 300) return `\x1b[36m${status}\x1b[0m`; // cyan
+  return `\x1b[32m${status}\x1b[0m`; // green
+}
+
+function colorMethod(method: string): string {
+  const colors: Record<string, string> = {
+    GET: "\x1b[32m",    // green
+    POST: "\x1b[34m",   // blue
+    PUT: "\x1b[33m",    // yellow
+    DELETE: "\x1b[31m", // red
+    PATCH: "\x1b[35m",  // magenta
+  };
+  return `${colors[method] || ""}${method}\x1b[0m`;
+}
+
+function logRequest(log: RequestLog): void {
+  // Console output (similar to Hono logger)
+  const duration = log.durationMs < 1000
+    ? `${log.durationMs}ms`
+    : `${(log.durationMs / 1000).toFixed(2)}s`;
+
+  console.log(
+    `  ${colorMethod(log.method.padEnd(6))} ${log.path} ${colorStatus(log.status)} ${duration}`
+  );
+
+  // Store in memory for API access
+  requestLogs.push(log);
+  if (requestLogs.length > MAX_REQUEST_LOGS) {
+    requestLogs.splice(0, requestLogs.length - MAX_REQUEST_LOGS);
+  }
+}
+
+function getRequestLogs(options?: {
+  limit?: number;
+  path?: string;
+  method?: string;
+  minStatus?: number;
+}): RequestLog[] {
+  let logs = [...requestLogs];
+
+  if (options?.path) {
+    logs = logs.filter((l) => l.path.includes(options.path!));
+  }
+  if (options?.method) {
+    logs = logs.filter((l) => l.method === options.method!.toUpperCase());
+  }
+  if (options?.minStatus) {
+    logs = logs.filter((l) => l.status >= options.minStatus!);
+  }
+
+  // Return most recent first
+  logs.reverse();
+
+  if (options?.limit) {
+    logs = logs.slice(0, options.limit);
+  }
+
+  return logs;
+}
+
+// Wrap route handler with logging
+function withLogging<T extends (...args: any[]) => Promise<Response> | Response>(
+  handler: T
+): T {
+  return (async (req: Request, ...rest: any[]) => {
+    const start = performance.now();
+    const url = new URL(req.url);
+
+    let response: Response;
+    try {
+      response = await handler(req, ...rest);
+    } catch (err) {
+      response = json({ error: (err as Error).message }, { status: 500 });
+    }
+
+    const log: RequestLog = {
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      path: url.pathname,
+      status: response.status,
+      durationMs: Math.round(performance.now() - start),
+      ip: getClientIP(req),
+      userAgent: req.headers.get("user-agent") || "unknown",
+    };
+
+    logRequest(log);
+    return response;
+  }) as T;
+}
+
 Bun.serve({
   port,
   hostname: "0.0.0.0",
@@ -546,17 +658,33 @@ Bun.serve({
 
     "/api/scenarios/generate/:patientId/evaluate": {
       POST: async (req) => {
+        const start = performance.now();
+        const url = new URL(req.url);
+
+        const logAndReturn = (response: Response) => {
+          logRequest({
+            timestamp: new Date().toISOString(),
+            method: req.method,
+            path: url.pathname,
+            status: response.status,
+            durationMs: Math.round(performance.now() - start),
+            ip: getClientIP(req),
+            userAgent: req.headers.get("user-agent") || "unknown",
+          });
+          return response;
+        };
+
         const patientId = req.params.patientId;
-        if (!patientId) return notFound();
+        if (!patientId) return logAndReturn(notFound());
 
         const patient = getPatient(patientId);
-        if (!patient) return notFound(`Patient ${patientId} not found`);
+        if (!patient) return logAndReturn(notFound(`Patient ${patientId} not found`));
 
         // Check per-patient rate limit (cooldown)
         const cooldown = checkPatientCooldown(patientId);
         if (!cooldown.allowed) {
           const remainingSec = Math.ceil(cooldown.remainingMs / 1000);
-          return json(
+          return logAndReturn(json(
             {
               error: "Rate limited",
               message: `Patient ${patientId} was recently evaluated. Please wait ${remainingSec} seconds before re-evaluating.`,
@@ -567,7 +695,7 @@ Bun.serve({
               status: 429,
               headers: { "Retry-After": String(remainingSec) },
             }
-          );
+          ));
         }
 
         // Parse request body for optional specialist filter
@@ -584,7 +712,7 @@ Bun.serve({
         try {
           openai = makeOpenAIClient();
         } catch (err) {
-          return json({ error: (err as Error).message }, { status: 500 });
+          return logAndReturn(json({ error: (err as Error).message }, { status: 500 }));
         }
 
         const scenario = generateScenarioFromPatient(patient);
@@ -781,7 +909,7 @@ Bun.serve({
           // Continue returning the result even if persistence fails
         }
 
-        return json(evaluationResult);
+        return logAndReturn(json(evaluationResult));
       },
     },
 
@@ -917,7 +1045,70 @@ Bun.serve({
           status: "ok",
           timestamp: new Date().toISOString(),
           patients: loadPatients().length,
+          runtime: "bun",
         }),
+    },
+
+    // --- Request logs ---
+
+    "/api/logs/requests": {
+      GET: (req) => {
+        const url = new URL(req.url);
+        const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+        const path = url.searchParams.get("path") || undefined;
+        const method = url.searchParams.get("method") || undefined;
+        const minStatus = url.searchParams.get("minStatus")
+          ? parseInt(url.searchParams.get("minStatus")!, 10)
+          : undefined;
+
+        const logs = getRequestLogs({ limit, path, method, minStatus });
+        return json({
+          logs,
+          count: logs.length,
+          total: requestLogs.length,
+        });
+      },
+    },
+
+    "/api/logs/requests/stats": {
+      GET: () => {
+        const logs = requestLogs;
+        const now = Date.now();
+        const hour = 60 * 60 * 1000;
+        const day = 24 * hour;
+
+        const lastHour = logs.filter((l) => now - new Date(l.timestamp).getTime() < hour);
+        const last24h = logs.filter((l) => now - new Date(l.timestamp).getTime() < day);
+
+        const byStatus: Record<string, number> = {};
+        const byMethod: Record<string, number> = {};
+        const byPath: Record<string, number> = {};
+        let totalDuration = 0;
+
+        for (const log of logs) {
+          const statusGroup = `${Math.floor(log.status / 100)}xx`;
+          byStatus[statusGroup] = (byStatus[statusGroup] || 0) + 1;
+          byMethod[log.method] = (byMethod[log.method] || 0) + 1;
+          byPath[log.path] = (byPath[log.path] || 0) + 1;
+          totalDuration += log.durationMs;
+        }
+
+        // Top 10 paths by frequency
+        const topPaths = Object.entries(byPath)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([path, count]) => ({ path, count }));
+
+        return json({
+          total: logs.length,
+          lastHour: lastHour.length,
+          last24h: last24h.length,
+          avgDurationMs: logs.length > 0 ? Math.round(totalDuration / logs.length) : 0,
+          byStatus,
+          byMethod,
+          topPaths,
+        });
+      },
     },
 
     // ============================================================================
@@ -926,6 +1117,22 @@ Bun.serve({
 
     "/api/ingest": {
       POST: async (req) => {
+        const start = performance.now();
+        const url = new URL(req.url);
+
+        const logAndReturn = (response: Response) => {
+          logRequest({
+            timestamp: new Date().toISOString(),
+            method: req.method,
+            path: url.pathname,
+            status: response.status,
+            durationMs: Math.round(performance.now() - start),
+            ip: getClientIP(req),
+            userAgent: req.headers.get("user-agent") || "unknown",
+          });
+          return response;
+        };
+
         const clientIP = getClientIP(req);
         const userAgent = req.headers.get("user-agent") || "unknown";
         const apiKeyPrefix = (req.headers.get("X-API-Key") || "").slice(0, 8) || "none";
@@ -935,7 +1142,7 @@ Bun.serve({
         try {
           bodyText = await req.text();
         } catch {
-          return json({ error: "Failed to read request body" }, { status: 400 });
+          return logAndReturn(json({ error: "Failed to read request body" }, { status: 400 }));
         }
 
         // Verify authentication
@@ -951,7 +1158,7 @@ Bun.serve({
             method: "POST",
             reason: authResult.error,
           });
-          return unauthorizedResponse(authResult.error!, authResult.statusCode);
+          return logAndReturn(unauthorizedResponse(authResult.error!, authResult.statusCode));
         }
 
         try {
@@ -975,7 +1182,7 @@ Bun.serve({
               recordCount,
             });
 
-            return json({ ingested: records.length, records });
+            return logAndReturn(json({ ingested: records.length, records }));
           }
 
           // Handle JSON (single object or array)
@@ -996,7 +1203,7 @@ Bun.serve({
               recordCount,
             });
 
-            return json({ ingested: records.length, records });
+            return logAndReturn(json({ ingested: records.length, records }));
           }
 
           const record = append(body);
@@ -1013,9 +1220,9 @@ Bun.serve({
             recordCount,
           });
 
-          return json({ ingested: 1, record });
+          return logAndReturn(json({ ingested: 1, record }));
         } catch (err) {
-          return json({ error: (err as Error).message }, { status: 400 });
+          return logAndReturn(json({ error: (err as Error).message }, { status: 400 }));
         }
       },
     },
@@ -1077,11 +1284,41 @@ Bun.serve({
       },
     },
   },
-  fetch() {
-    return notFound();
+  fetch(req) {
+    // Log 404 requests (unmatched routes)
+    const start = performance.now();
+    const url = new URL(req.url);
+    const response = notFound();
+
+    logRequest({
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      path: url.pathname,
+      status: 404,
+      durationMs: Math.round(performance.now() - start),
+      ip: getClientIP(req),
+      userAgent: req.headers.get("user-agent") || "unknown",
+    });
+
+    return response;
   },
-  error(err) {
-    return json({ error: err.message }, { status: 500 });
+  error(err, req) {
+    // Log 500 errors
+    const start = performance.now();
+    const url = new URL(req.url);
+    const response = json({ error: err.message }, { status: 500 });
+
+    logRequest({
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      path: url.pathname,
+      status: 500,
+      durationMs: Math.round(performance.now() - start),
+      ip: getClientIP(req),
+      userAgent: req.headers.get("user-agent") || "unknown",
+    });
+
+    return response;
   },
 });
 

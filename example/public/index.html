@@ -511,7 +511,7 @@
   </div>
 
   <main>
-    <details class="data-info" open>
+    <details class="data-info">
       <summary>Data Info</summary>
       <div class="data-info-content">
         <p>
@@ -617,7 +617,7 @@
         <div class="actions">
           <button id="evaluate-btn">Evaluate Case</button>
           <button id="refresh-btn" class="secondary" style="display:none;">Refresh (bypass cache)</button>
-          <span id="cache-indicator" style="display:none;font-size:11px;color:#86efac;margin-left:8px;"></span>
+          <span id="cache-indicator" style="display:none;font-size:11px;color:#86efac;flex:1;text-align:center;"></span>
           <button id="export-btn" class="secondary">Export All (JSON)</button>
         </div>
       </div>
@@ -1109,7 +1109,7 @@
             cacheIndicator.style.display = 'inline';
             refreshBtn.style.display = 'inline-block';
           } else {
-            cacheIndicator.textContent = 'Fresh evaluation';
+            cacheIndicator.textContent = 'Version 0';
             cacheIndicator.style.display = 'inline';
             refreshBtn.style.display = 'none';
           }

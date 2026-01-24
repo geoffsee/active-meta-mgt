@@ -41,7 +41,7 @@ example/data/source/
 example/data/reference/
 example/data/patients.csv
 example/data/reference-ranges.json
-
+evaluations.jsonl
 # Keep READMEs
 !example/data/README.md
 
