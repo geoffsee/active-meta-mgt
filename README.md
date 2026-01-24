@@ -637,6 +637,301 @@ stateDiagram-v2
 | **Synthesize** | `Synthesized` | Appears under "Evidence:" in workingMemory.text |
 | **Archive** | `Archived` | Snapshot stored for compliance audit |
 
+## Example: Integrating External Medical APIs
+
+This example demonstrates how to ingest clinical data from external medical APIs (FHIR servers, lab interfaces, pharmacy systems) into the context management framework.
+
+```typescript
+import { makeDefaultActiveMetaContext } from "active-meta-mgt";
+
+const ctx = makeDefaultActiveMetaContext("patient-encounter-001");
+
+// Configure clinical lanes
+ctx.ensureLane("diagnosis", "Clinical Findings");
+ctx.lanes.get("diagnosis")?.setIncludeTagsAny([{ key: "lane", value: "diagnosis" }]);
+
+ctx.ensureLane("medications", "Active Medications");
+ctx.lanes.get("medications")?.setIncludeTagsAny([{ key: "lane", value: "medications" }]);
+
+ctx.ensureLane("allergies", "Allergies & Contraindications");
+ctx.lanes.get("allergies")?.setIncludeTagsAny([{ key: "lane", value: "allergies" }]);
+ctx.lanes.get("allergies")?.setWindowPolicy({ maxItems: 10, wSeverity: 2.0 });
+
+// =============================================================================
+// FHIR API Integration - Fetch patient observations from a FHIR R4 server
+// =============================================================================
+
+interface FHIRObservation {
+  resourceType: "Observation";
+  id: string;
+  status: string;
+  code: { coding: Array<{ system: string; code: string; display: string }> };
+  valueQuantity?: { value: number; unit: string };
+  effectiveDateTime: string;
+  interpretation?: Array<{ coding: Array<{ code: string }> }>;
+}
+
+async function fetchFHIRObservations(
+  patientId: string,
+  category: string
+): Promise<FHIRObservation[]> {
+  const FHIR_BASE_URL = process.env.FHIR_SERVER_URL; // e.g., "https://fhir.example.org/r4"
+  const response = await fetch(
+    `${FHIR_BASE_URL}/Observation?patient=${patientId}&category=${category}&_sort=-date&_count=20`,
+    {
+      headers: {
+        Accept: "application/fhir+json",
+        Authorization: `Bearer ${process.env.FHIR_ACCESS_TOKEN}`,
+      },
+    }
+  );
+  const bundle = await response.json();
+  return bundle.entry?.map((e: { resource: FHIRObservation }) => e.resource) ?? [];
+}
+
+function mapFHIRSeverity(interpretation?: Array<{ coding: Array<{ code: string }> }>):
+  "low" | "medium" | "high" | "critical" {
+  const code = interpretation?.[0]?.coding?.[0]?.code;
+  switch (code) {
+    case "HH": case "LL": case "AA": return "critical";
+    case "H": case "L": case "A": return "high";
+    case "N": return "low";
+    default: return "medium";
+  }
+}
+
+// Ingest lab results from FHIR server
+async function ingestFHIRLabResults(patientId: string) {
+  const observations = await fetchFHIRObservations(patientId, "laboratory");
+
+  for (const obs of observations) {
+    const display = obs.code.coding[0]?.display ?? "Unknown test";
+    const value = obs.valueQuantity
+      ? `${obs.valueQuantity.value} ${obs.valueQuantity.unit}`
+      : "See report";
+
+    await ctx.ingestEvidence(
+      {
+        id: `fhir-obs-${obs.id}`,
+        summary: `${display}: ${value}`,
+        detail: `FHIR Observation ${obs.id}, collected ${obs.effectiveDateTime}`,
+        severity: mapFHIRSeverity(obs.interpretation),
+        confidence: "high",
+        tags: [{ key: "lane", value: "diagnosis" }],
+        provenance: { source: "system", ref: `FHIR:Observation/${obs.id}` },
+      },
+      { synthesize: false } // Batch ingest, synthesize once at the end
+    );
+  }
+}
+
+// =============================================================================
+// External Lab Interface API - Real-time lab result streaming
+// =============================================================================
+
+interface LabResult {
+  accession: string;
+  testCode: string;
+  testName: string;
+  result: string;
+  units: string;
+  referenceRange: string;
+  flag: "N" | "L" | "H" | "LL" | "HH" | "C";
+  collectedAt: string;
+}
+
+async function fetchLabResults(patientMRN: string): Promise<LabResult[]> {
+  const LAB_API_URL = process.env.LAB_INTERFACE_URL;
+  const response = await fetch(
+    `${LAB_API_URL}/results?mrn=${patientMRN}&hours=24`,
+    {
+      headers: { "X-API-Key": process.env.LAB_API_KEY! },
+    }
+  );
+  return response.json();
+}
+
+function mapLabFlag(flag: string): "low" | "medium" | "high" | "critical" {
+  switch (flag) {
+    case "C": case "HH": case "LL": return "critical";
+    case "H": case "L": return "high";
+    default: return "low";
+  }
+}
+
+async function ingestLabInterfaceResults(patientMRN: string) {
+  const results = await fetchLabResults(patientMRN);
+
+  for (const lab of results) {
+    const flagText = lab.flag !== "N" ? ` (${lab.flag})` : "";
+
+    await ctx.ingestEvidence(
+      {
+        id: `lab-${lab.accession}-${lab.testCode}`,
+        summary: `${lab.testName}: ${lab.result} ${lab.units}${flagText}`,
+        detail: `Reference: ${lab.referenceRange}, Collected: ${lab.collectedAt}`,
+        severity: mapLabFlag(lab.flag),
+        confidence: "high",
+        tags: [{ key: "lane", value: "diagnosis" }],
+        provenance: { source: "system", ref: `LAB:${lab.accession}` },
+      },
+      { synthesize: false }
+    );
+  }
+}
+
+// =============================================================================
+// Pharmacy/Medication API - Active medication list
+// =============================================================================
+
+interface Medication {
+  rxNumber: string;
+  drugName: string;
+  dose: string;
+  route: string;
+  frequency: string;
+  prescriber: string;
+  startDate: string;
+  isHighAlert: boolean;
+}
+
+async function fetchActiveMedications(patientId: string): Promise<Medication[]> {
+  const PHARMACY_API_URL = process.env.PHARMACY_API_URL;
+  const response = await fetch(
+    `${PHARMACY_API_URL}/patients/${patientId}/medications/active`,
+    {
+      headers: { Authorization: `Bearer ${process.env.PHARMACY_TOKEN}` },
+    }
+  );
+  return response.json();
+}
+
+async function ingestMedicationList(patientId: string) {
+  const medications = await fetchActiveMedications(patientId);
+
+  for (const med of medications) {
+    ctx.upsertEvidence({
+      id: `med-${med.rxNumber}`,
+      summary: `${med.drugName} ${med.dose} ${med.route} ${med.frequency}`,
+      detail: `Prescribed by ${med.prescriber}, started ${med.startDate}`,
+      severity: med.isHighAlert ? "high" : "low",
+      confidence: "high",
+      tags: [{ key: "lane", value: "medications" }],
+      provenance: { source: "system", ref: `RX:${med.rxNumber}` },
+    });
+  }
+}
+
+// =============================================================================
+// Allergy Registry API - Known allergies and adverse reactions
+// =============================================================================
+
+interface AllergyRecord {
+  id: string;
+  allergen: string;
+  allergenType: "drug" | "food" | "environmental";
+  reaction: string;
+  severity: "mild" | "moderate" | "severe" | "life-threatening";
+  verifiedDate: string;
+}
+
+async function fetchAllergies(patientId: string): Promise<AllergyRecord[]> {
+  const ALLERGY_API_URL = process.env.ALLERGY_REGISTRY_URL;
+  const response = await fetch(
+    `${ALLERGY_API_URL}/patients/${patientId}/allergies`,
+    {
+      headers: { Authorization: `Bearer ${process.env.ALLERGY_TOKEN}` },
+    }
+  );
+  return response.json();
+}
+
+function mapAllergySeverity(
+  severity: string
+): "low" | "medium" | "high" | "critical" {
+  switch (severity) {
+    case "life-threatening": return "critical";
+    case "severe": return "high";
+    case "moderate": return "medium";
+    default: return "low";
+  }
+}
+
+async function ingestAllergies(patientId: string) {
+  const allergies = await fetchAllergies(patientId);
+
+  for (const allergy of allergies) {
+    ctx.upsertConstraint({
+      id: `allergy-${allergy.id}`,
+      statement: `ALLERGY: ${allergy.allergen} (${allergy.allergenType}) - ${allergy.reaction}`,
+      priority: allergy.severity === "life-threatening" ? "p0" : "p1",
+      tags: [{ key: "lane", value: "allergies" }],
+      provenance: { source: "system", ref: `ALLERGY:${allergy.id}` },
+    });
+
+    // Pin life-threatening allergies
+    if (allergy.severity === "life-threatening") {
+      ctx.lanes.get("allergies")?.pin("constraint", `allergy-${allergy.id}`);
+    }
+  }
+}
+
+// =============================================================================
+// Complete Integration Example - Aggregate all external sources
+// =============================================================================
+
+async function loadPatientContext(patientId: string, patientMRN: string) {
+  console.log("Loading patient context from external APIs...");
+
+  // Fetch from all external sources in parallel
+  await Promise.all([
+    ingestFHIRLabResults(patientId),
+    ingestLabInterfaceResults(patientMRN),
+    ingestMedicationList(patientId),
+    ingestAllergies(patientId),
+  ]);
+
+  console.log(`Loaded ${ctx.evidence.size} evidence items`);
+  console.log(`Loaded ${ctx.constraints.size} constraints`);
+
+  // Synthesize working memory from all lanes
+  ctx.synthesizeFromLanes({
+    tokenBudget: 1000,
+    archiveRawItems: false,
+  });
+
+  // Get LLM-ready payload
+  const payload = ctx.buildLLMContextPayload();
+  console.log("Working memory synthesized:");
+  console.log(payload.workingMemory.text);
+
+  return payload;
+}
+
+// Usage
+await loadPatientContext("patient-12345", "MRN-98765");
+```
+
+### Key Integration Patterns
+
+| Pattern | Description | Use Case |
+|---------|-------------|----------|
+| **Batch Ingest** | Use `synthesize: false` when loading multiple items, then call `synthesizeFromLanes()` once | Initial context load from multiple APIs |
+| **Real-time Ingest** | Use `ingestEvidence()` with `synthesize: true` for immediate re-synthesis | New lab result arrives during encounter |
+| **Provenance Tracking** | Set `provenance.source` to `"system"` and `provenance.ref` to source identifier | Audit trail for external data sources |
+| **Auto-Pin Critical Items** | Call `lane.pin()` for life-threatening allergies or critical findings | Ensure critical items always appear in context |
+
+### Supported External Data Sources
+
+The framework can integrate with any medical API that returns structured data:
+
+- **FHIR R4 Servers** - Observations, Conditions, MedicationRequests, AllergyIntolerance
+- **HL7 v2 Interfaces** - Lab results (ORU), ADT messages
+- **Pharmacy Systems** - Active medication lists, drug interaction checks
+- **Allergy Registries** - Known allergies and adverse reactions
+- **Radiology/PACS** - Imaging findings and reports
+- **Clinical Decision Support** - External CDS recommendations
+
 ## License
 
 MIT License
