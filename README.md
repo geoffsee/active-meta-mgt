@@ -1,4 +1,4 @@
-[![Test](https://github.com/williamseemueller/active-meta-mgt/actions/workflows/test.yml/badge.svg)](https://github.com/williamseemueller/active-meta-mgt/actions/workflows/test.yml)
+[![Test](https://github.com/geoffsee/active-meta-mgt/actions/workflows/test.yml/badge.svg)](https://github.com/williamseemueller/active-meta-mgt/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # Active Meta-Context Management (Framework)
