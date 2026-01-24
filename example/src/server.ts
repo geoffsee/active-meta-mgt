@@ -10,6 +10,7 @@ import {
   getDatasetStats,
   filterPatients,
 } from "./data/loaders/patients";
+import { append, readLog, getIngestedPatients, toPatient } from "./data/ingest";
 import {
   generateScenario,
   generateScenarioFromPatient,
@@ -22,6 +23,16 @@ import { icdToScenario, getMappedIcdCodes } from "./data/reference/icdMapping";
 import { drugConstraints } from "./data/reference/drugRules";
 import { makeDefaultActiveMetaContext } from "active-meta-mgt";
 import { SPECIALISTS, type Specialist } from "./specialists";
+import {
+  detectConflicts,
+  makeSpecialistCoordinator,
+  snapshotRuns,
+  snapshotConflicts,
+  snapshotFindings,
+  snapshotFollowUps,
+  structureSpecialistResponse,
+  makeRunId,
+} from "./specialistCoordinator";
 
 const port = Number(process.env.PORT ?? process.env.BUN_PORT ?? 3333);
 const publicDir = new URL("../public/", import.meta.url);
@@ -30,7 +41,7 @@ async function resolvePublicFile(path: string): Promise<{ file: Blob; url: URL }
   const primaryUrl = new URL(path, publicDir);
   const fallbackUrl = new URL(path, publicDirFallback);
   const primaryFile = Bun.file(primaryUrl);
-  if (await primaryFile.exists()) return { file: primaryFile, url: primaryUrl };
+  if (await (primaryFile as any).exists?.()) return { file: primaryFile, url: primaryUrl };
 
   const fallbackFile = Bun.file(fallbackUrl);
   return { file: fallbackFile, url: fallbackUrl };
@@ -65,7 +76,7 @@ Bun.serve({
     "/": {
       GET: async () => {
         const { file } = await resolvePublicFile("index.html");
-        if (!(await file.exists())) return notFound("UI not built");
+        if (!(await (file as any).exists?.())) return notFound("UI not built");
         return new Response(file, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
@@ -74,7 +85,7 @@ Bun.serve({
 
     "/public/:path+": {
       GET: async (req) => {
-        const relPath = req.params.path;
+        const relPath = (req.params as any)["path+"] ?? (req.params as any).path;
         try {
           const { file, url } = await resolvePublicFile(relPath);
           // Prevent escaping the public directory
@@ -83,7 +94,7 @@ Bun.serve({
             url.pathname.startsWith(publicDirFallback.pathname);
           if (!allowed) return notFound();
 
-          if (!(await file.exists())) return notFound();
+          if (!(await (file as any).exists?.())) return notFound();
 
           return new Response(file, {
             headers: { "content-type": file.type || "application/octet-stream" },
@@ -365,6 +376,14 @@ Bun.serve({
           // No body or invalid JSON - use all specialists
         }
 
+        // Single OpenAI client for the whole request
+        let openai: ReturnType<typeof makeOpenAIClient>;
+        try {
+          openai = makeOpenAIClient();
+        } catch (err) {
+          return json({ error: (err as Error).message }, { status: 500 });
+        }
+
         const scenario = generateScenarioFromPatient(patient);
         const patientSummary = `${patient.age}${patient.gender} with ${patient.primary_diagnosis}`;
 
@@ -388,8 +407,8 @@ Bun.serve({
               wPriority: specialist.policy.wPriority,
               wRecency: specialist.policy.wRecency,
               maxItems: specialist.policy.maxItems,
-              includeTagsAny: specialist.laneTags,
             });
+            lane.setIncludeTagsAny(specialist.laneTags);
           }
 
           // Add knowledge objects with specialist-relevant tags
@@ -438,7 +457,6 @@ Bun.serve({
 
           // Call LLM with specialist-specific prompts
           try {
-            const openai = makeOpenAIClient();
             const userPrompt = specialist.userPromptTemplate
               .replace("{patient}", patientSummary)
               .replace("{workingMemory}", workingMemory);
@@ -478,6 +496,54 @@ Bun.serve({
           activeSpecialists.map(evaluateSpecialist)
         );
 
+        // Post-process: structure outputs, detect conflicts, compute follow-ups
+        const coordinator = makeSpecialistCoordinator();
+
+        for (const result of results) {
+          if (result.status !== "success") continue;
+          try {
+            const specialist = SPECIALISTS.find((s) => s.id === result.id);
+            if (!specialist) continue;
+            const findings = await structureSpecialistResponse({
+              openai,
+              specialist,
+              patientId,
+              patientSummary,
+              workingMemory: result.workingMemory,
+              rawResponse: result.response ?? "",
+              maxItems: 8,
+            });
+            coordinator.addRun({
+              id: makeRunId(patientId, result.id, result.response ?? ""),
+              specialistId: result.id,
+              workingMemory: result.workingMemory,
+              rawText: result.response ?? "",
+              findings,
+            });
+          } catch (err) {
+            // Keep the evaluation response but skip structuring on failure
+            coordinator.addRun({
+              id: `${patientId}-${result.id}-${Date.now().toString(36)}-err`,
+              specialistId: result.id,
+              workingMemory: result.workingMemory,
+              rawText: result.response ?? "",
+              findings: [],
+            });
+          }
+        }
+
+        // Conflict detection across all findings
+        try {
+          const conflicts = await detectConflicts({
+            openai,
+            findings: snapshotFindings(coordinator),
+            maxItems: 6,
+          });
+          coordinator.setConflicts(conflicts);
+        } catch {
+          // leave conflicts empty on failure
+        }
+
         return json({
           patientId,
           patient: {
@@ -492,6 +558,12 @@ Bun.serve({
             title: scenario.title,
           },
           specialists: results,
+          structured: {
+            runs: snapshotRuns(coordinator.runs),
+            findings: snapshotFindings(coordinator),
+            conflicts: snapshotConflicts(coordinator),
+            followUps: snapshotFollowUps(coordinator),
+          },
           timestamp: new Date().toISOString(),
         });
       },
@@ -597,6 +669,69 @@ Bun.serve({
           patients: loadPatients().length,
         }),
     },
+
+    // ============================================================================
+    // Data Ingestion - pipe in whatever you have
+    // ============================================================================
+
+    "/api/ingest": {
+      POST: async (req) => {
+        try {
+          const contentType = req.headers.get("content-type") || "";
+
+          // Handle JSONL (newline-delimited JSON)
+          if (contentType.includes("application/x-ndjson") || contentType.includes("text/plain")) {
+            const text = await req.text();
+            const lines = text.split("\n").filter(Boolean);
+            const records = lines.map((line) => append(JSON.parse(line)));
+            return json({ ingested: records.length, records });
+          }
+
+          // Handle JSON (single object or array)
+          const body = await req.json();
+
+          if (Array.isArray(body)) {
+            const records = body.map((item) => append(item));
+            return json({ ingested: records.length, records });
+          }
+
+          const record = append(body);
+          return json({ ingested: 1, record });
+        } catch (err) {
+          return json({ error: (err as Error).message }, { status: 400 });
+        }
+      },
+    },
+
+    "/api/ingest/log": {
+      GET: (req) => {
+        const url = new URL(req.url);
+        const limit = parseInt(url.searchParams.get("limit") || "100");
+        const log = readLog();
+        return json({
+          total: log.length,
+          records: log.slice(-limit),
+        });
+      },
+    },
+
+    "/api/ingest/patients": {
+      GET: () => {
+        const patients = getIngestedPatients();
+        return json({
+          total: patients.length,
+          patients: patients.map((p) => ({
+            id: p.patient_id,
+            age: p.age,
+            gender: p.gender,
+            diagnosis: p.primary_diagnosis,
+            category: p.condition_category,
+            severity: p.severity_score,
+            critical: p.critical_flag,
+          })),
+        });
+      },
+    },
   },
   fetch() {
     return notFound();
@@ -609,30 +744,30 @@ Bun.serve({
 console.log(`Example server running on http://localhost:${port}`);
 console.log(`
 API Endpoints:
-  Original:
-    GET  /scenarios                          - List static scenarios
-    GET  /scenarios/:id/context              - Get scenario context
-    POST /scenarios/:id/llm                  - Query LLM with scenario
 
-  New (for HTML UI):
-    GET  /api/patients                       - List patients (with filters)
-    GET  /api/patients/:id                   - Get patient details
-    POST /api/scenarios/generate             - Generate scenario from patient
-    GET  /api/scenarios/generate/:id         - Generate scenario (GET)
-    GET  /api/scenarios/generate/:id/context - Get generated scenario context
-    POST /api/scenarios/generate/:id/llm     - Query LLM with generated scenario
-    GET  /api/scenarios/stats                - Get scenario statistics
+  Data Ingestion (pipe in whatever you have):
+    POST /api/ingest                         - Ingest any JSON/JSONL patient data
+    GET  /api/ingest/log                     - View ingest log
+    GET  /api/ingest/patients                - List ingested patients
 
-  Multi-Specialist Evaluation (core active-meta-mgt pattern):
+    Examples:
+      curl -X POST localhost:3333/api/ingest -H 'Content-Type: application/json' \\
+        -d '{"id":"P1","age":65,"diagnosis":"Chest Pain","bp":"140/90"}'
+
+      cat patients.jsonl | curl -X POST localhost:3333/api/ingest \\
+        -H 'Content-Type: application/x-ndjson' --data-binary @-
+
+  Multi-Specialist Evaluation:
     GET  /api/specialists                    - List available specialists
-    POST /api/scenarios/generate/:id/evaluate - Fan-out to all specialists in parallel
+    POST /api/scenarios/generate/:id/evaluate - Fan-out to all specialists
+
+  Patients & Scenarios:
+    GET  /api/patients                       - List all patients
+    GET  /api/patients/:id                   - Get patient details
+    GET  /api/scenarios/generate/:id/context - Get scenario context
 
   Reference Data:
-    GET  /api/reference/lab-ranges           - Get all lab reference ranges
-    GET  /api/reference/lab-ranges/:name     - Get specific lab range
-    GET  /api/reference/conditions           - List ICD condition mappings
-    GET  /api/reference/conditions/:code     - Get specific ICD mapping
-    GET  /api/reference/medications          - List medication rules
-    GET  /api/reference/medications/:name    - Get specific medication rules
-    GET  /api/health                         - Health check
+    GET  /api/reference/lab-ranges           - Lab reference ranges
+    GET  /api/reference/conditions           - ICD condition mappings
+    GET  /api/reference/medications          - Medication rules
 `);

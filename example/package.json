@@ -5,15 +5,23 @@
   "scripts": {
     "dev": "bun run src/server.ts",
     "start": "bun run src/server.ts",
-    "probe": "bun run src/main.ts"
+    "probe": "bun run src/main.ts",
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build:worker": "echo 'Build handled by wrangler'",
+    "cf:kv:create": "wrangler kv:namespace create PATIENTS_KV && wrangler kv:namespace create PATIENTS_KV --preview",
+    "cf:secret:set": "wrangler secret put OPENAI_API_KEY"
   },
   "dependencies": {
     "active-meta-mgt": "file:..",
     "csv-parse": "^6.1.0",
+    "hono": "^4.4.0",
     "openai": "^4.31.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240512.0",
     "@types/node": "^22.9.0",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "wrangler": "^3.57.0"
   }
 }

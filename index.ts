@@ -24,7 +24,22 @@ export { types, type Instance, type SnapshotIn } from "mobx-state-tree";
 const ISODateString = types.string;
 
 const Severity = types.enumeration("Severity", ["low", "medium", "high", "critical"]);
-const Confidence = types.enumeration("Confidence", ["low", "medium", "high"]);
+const ConfidenceLabel = types.enumeration("ConfidenceLabel", ["low", "medium", "high"]);
+const ConfidenceNumeric = types.refinement(
+    "ConfidenceNumeric",
+    types.number,
+    (val) => val >= 0 && val <= 1
+);
+const Confidence = types.union(
+    {
+        dispatcher: (snapshot) => {
+            if (typeof snapshot === "number") return ConfidenceNumeric;
+            return ConfidenceLabel;
+        },
+    },
+    ConfidenceLabel,
+    ConfidenceNumeric
+);
 const Status = types.enumeration("Status", ["active", "paused", "done", "archived"]);
 const Priority = types.enumeration("Priority", ["p0", "p1", "p2", "p3"]);
 
@@ -81,7 +96,9 @@ const Evidence = types
     .views((self) => ({
         get weight() {
             const sev = { low: 1, medium: 2, high: 3, critical: 4 }[self.severity];
-            const conf = { low: 0.6, medium: 1.0, high: 1.3 }[self.confidence];
+            const conf = typeof self.confidence === "number"
+                ? 0.6 + self.confidence * 0.7  // 0->0.6, 0.5->0.95, 1->1.3
+                : { low: 0.6, medium: 1.0, high: 1.3 }[self.confidence];
             return sev * conf;
         },
     }));
@@ -305,8 +322,10 @@ export const ActiveMetaContext = types
         const priorityScore = (p: Instance<typeof Priority>) =>
             ({ p0: 4, p1: 3, p2: 2, p3: 1 } as const)[p];
 
-        const confidenceScore = (c: Instance<typeof Confidence>) =>
-            ({ low: 1, medium: 2, high: 3 } as const)[c];
+        const confidenceScore = (c: Instance<typeof Confidence>): number => {
+            if (typeof c === "number") return 1 + c * 2; // 0->1, 0.5->2, 1->3
+            return ({ low: 1, medium: 2, high: 3 } as const)[c];
+        };
 
         const severityScore = (s: Instance<typeof Severity>) =>
             ({ low: 1, medium: 2, high: 3, critical: 4 } as const)[s];

@@ -248,6 +248,82 @@
       color: #666;
     }
 
+    /* Structured outputs */
+    .structured { margin-top: 18px; }
+    .structured-row {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 1200px) { .structured-row { grid-template-columns: 1fr; } }
+    .panel {
+      background: #0d0d0d;
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #777;
+      margin-bottom: 8px;
+    }
+    .panel-body {
+      font-size: 12px;
+      line-height: 1.5;
+      display: grid;
+      gap: 8px;
+    }
+    .finding {
+      border: 1px solid #1f1f1f;
+      border-left: 3px solid #333;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #111;
+    }
+    .finding .title { font-weight: 600; margin-bottom: 4px; }
+    .finding .meta {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: #777;
+      margin-bottom: 4px;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #1a1a1a;
+      font-size: 11px;
+      color: #aaa;
+    }
+    .tag.sev-critical { background: #5c2626; color: #fca5a5; }
+    .tag.sev-high { background: #7a4414; color: #fcd34d; }
+    .tag.sev-moderate { background: #1f2a1f; color: #86efac; }
+    .tag.sev-info { background: #1a1a1a; color: #9ca3af; }
+    .tag.conf-low { background: #1e293b; color: #93c5fd; }
+    .tag.conf-medium { background: #1f2937; color: #cbd5e1; }
+    .tag.conf-high { background: #0f172a; color: #a5b4fc; }
+    .empty-note { color: #555; font-style: italic; }
+    .conflict {
+      border: 1px solid #2a1a1a;
+      background: #120808;
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .followup {
+      border: 1px solid #1c2430;
+      background: #0c121b;
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .pill-id { font-family: 'SF Mono', monospace; font-size: 10px; color: #555; }
+
     button {
       background: #f6c343;
       color: #000;
@@ -327,6 +403,23 @@
 
         <div class="specialist-grid" id="specialist-grid"></div>
 
+        <div class="structured" id="structured" style="display:none;">
+          <div class="structured-row">
+            <div class="panel">
+              <div class="panel-header">Structured Findings <span class="pill-id" id="findings-count"></span></div>
+              <div class="panel-body" id="findings-body"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-header">Conflicts <span class="pill-id" id="conflicts-count"></span></div>
+              <div class="panel-body" id="conflicts-body"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-header">Follow-ups <span class="pill-id" id="followups-count"></span></div>
+              <div class="panel-body" id="followups-body"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="actions">
           <button id="evaluate-btn">Evaluate Case</button>
           <button id="export-btn" class="secondary">Export All (JSON)</button>
@@ -351,6 +444,13 @@
     const emptyState = $('empty-state');
     const caseDetail = $('case-detail');
     const specialistGrid = $('specialist-grid');
+    const structuredRoot = $('structured');
+    const findingsBody = $('findings-body');
+    const conflictsBody = $('conflicts-body');
+    const followupsBody = $('followups-body');
+    const findingsCount = $('findings-count');
+    const conflictsCount = $('conflicts-count');
+    const followupsCount = $('followups-count');
 
     // Simple markdown parser
     function renderMarkdown(text) {
@@ -373,6 +473,77 @@
         // Line breaks
         .replace(/\n\n/g, '<br><br>')
         .replace(/\n/g, '<br>');
+    }
+
+    const esc = (s = '') => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c] || c));
+
+    function severityClass(sev) {
+      if (sev === 'critical') return 'critical';
+      if (sev === 'high') return 'high';
+      if (sev === 'moderate') return 'moderate';
+      return 'info';
+    }
+
+    function renderStructured(structured) {
+      if (!structured) {
+        structuredRoot.style.display = 'none';
+        findingsBody.innerHTML = '';
+        conflictsBody.innerHTML = '';
+        followupsBody.innerHTML = '';
+        return;
+      }
+      structuredRoot.style.display = 'block';
+
+      const findings = structured.findings || [];
+      findingsCount.textContent = findings.length ? `${findings.length}` : '';
+      findingsBody.innerHTML = findings.length
+        ? findings.map(f => `
+            <div class="finding">
+              <div class="title">${esc(f.title)}</div>
+              <div class="meta">
+                <span class="tag sev-${severityClass(f.severity)}">${f.severity}</span>
+                <span class="tag conf-${f.confidence}">conf ${f.confidence}</span>
+                <span class="tag">${esc(f.category)}</span>
+                <span class="tag">${esc(f.specialistId || '')}</span>
+                ${f.timeframe ? `<span class="tag">${esc(f.timeframe)}</span>` : ''}
+              </div>
+              ${f.rationale ? `<div>${esc(f.rationale)}</div>` : ''}
+              ${f.tags?.length ? `<div class="meta">${f.tags.map(t => `<span class="tag">${esc(t.key)}${t.value ? ':'+esc(t.value) : ''}</span>`).join('')}</div>` : ''}
+              <div class="pill-id">${esc(f.id)}</div>
+            </div>
+          `).join('')
+        : '<div class="empty-note">No structured findings</div>';
+
+      const conflicts = structured.conflicts || [];
+      conflictsCount.textContent = conflicts.length ? `${conflicts.length}` : '';
+      conflictsBody.innerHTML = conflicts.length
+        ? conflicts.map(c => `
+            <div class="conflict">
+              <div class="title">${esc(c.summary || 'Conflict')}</div>
+              <div class="meta">
+                <span class="tag sev-${severityClass(c.severity)}">${c.severity}</span>
+                ${c.involvedFindingIds?.length ? `<span class="tag">${c.involvedFindingIds.length} finding(s)</span>` : ''}
+              </div>
+              ${c.involvedFindingIds?.length ? `<div class="pill-id">${c.involvedFindingIds.map(esc).join(', ')}</div>` : ''}
+              <div class="pill-id">${esc(c.id)}</div>
+            </div>
+          `).join('')
+        : '<div class="empty-note">No conflicts detected</div>';
+
+      const followups = structured.followUps || [];
+      followupsCount.textContent = followups.length ? `${followups.length}` : '';
+      followupsBody.innerHTML = followups.length
+        ? followups.map(f => `
+            <div class="followup">
+              <div class="title">${esc(f.action)}</div>
+              <div class="meta">
+                <span class="tag sev-${severityClass(f.severity)}">${f.severity}</span>
+              </div>
+              <div>${esc(f.reason)}</div>
+              <div class="pill-id">${esc(f.id)}</div>
+            </div>
+          `).join('')
+        : '<div class="empty-note">No follow-ups</div>';
     }
 
     async function init() {
@@ -491,6 +662,7 @@
       renderEmptySpecialistCards();
       $('evaluate-btn').disabled = false;
       $('evaluate-btn').textContent = 'Evaluate Case';
+      renderStructured(null);
 
       renderCaseList();
     }
@@ -638,6 +810,7 @@
           specialists.forEach(s => {
             updateSpecialistCard(s.id, { status: 'error', error: data.error });
           });
+          renderStructured(null);
         } else {
           // Update each specialist card with its result
           data.specialists.forEach(result => {
@@ -648,6 +821,8 @@
               workingMemory: result.workingMemory,
             });
           });
+
+          renderStructured(data.structured);
 
           // Save evaluation
           evaluations.push({
@@ -660,6 +835,7 @@
             patient: fullPatientData,
             specialists: data.specialists,
             scenario: data.scenario,
+            structured: data.structured,
           });
 
           renderCaseList();
@@ -669,6 +845,7 @@
         specialists.forEach(s => {
           updateSpecialistCard(s.id, { status: 'error', error: err.message });
         });
+        renderStructured(null);
       }
 
       btn.textContent = 'Evaluate Again';

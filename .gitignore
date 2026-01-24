@@ -44,3 +44,6 @@ example/data/reference-ranges.json
 
 # Keep READMEs
 !example/data/README.md
+
+# Wrangler (Cloudflare Workers)
+.wrangler/

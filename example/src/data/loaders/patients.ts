@@ -1,11 +1,10 @@
 /**
  * Patient data loader.
  *
- * Loads unified patient records from data/patients.csv.
+ * Source: data/ingest.jsonl (same format users POST to /api/ingest)
  */
 
-import { readFileSync } from "fs";
-import { parse } from "csv-parse/sync";
+import { getIngestedPatients } from "../ingest";
 
 export interface Patient {
   patient_id: string;
@@ -57,87 +56,20 @@ export interface Patient {
   critical_flag: boolean;
 }
 
-function parseFloat2(val: string): number | null {
-  if (!val || val === "") return null;
-  const n = parseFloat(val);
-  return isNaN(n) ? null : n;
-}
-
-function parseBool(val: string): boolean {
-  return val === "true" || val === "1" || val === "True";
-}
-
-function parseArray(val: string): string[] {
-  if (!val || val === "") return [];
-  return val.split("|").filter(Boolean);
-}
-
 let patientsCache: Patient[] | null = null;
+let lastCheck = 0;
 
 /**
- * Load all patients from the unified CSV.
+ * Load all patients from ingest.jsonl.
  */
 export function loadPatients(): Patient[] {
-  if (patientsCache) return patientsCache;
+  const now = Date.now();
+  if (patientsCache && now - lastCheck < 5000) {
+    return patientsCache;
+  }
+  lastCheck = now;
 
-  const csvPath = new URL("../../../data/patients.csv", import.meta.url).pathname;
-  const csvContent = readFileSync(csvPath, "utf-8");
-
-  const records = parse(csvContent, {
-    columns: true,
-    skip_empty_lines: true,
-  }) as Record<string, string>[];
-
-  patientsCache = records.map((r): Patient => ({
-    patient_id: r.patient_id,
-    age: parseInt(r.age) || 0,
-    age_bucket: r.age_bucket,
-    gender: (r.gender as "M" | "F" | "U") || "U",
-    blood_type: r.blood_type || "Unknown",
-    primary_diagnosis: r.primary_diagnosis,
-    icd9_code: r.icd9_code,
-    secondary_diagnoses: parseArray(r.secondary_diagnoses),
-    condition_category: r.condition_category,
-    insurance: r.insurance,
-    admission_type: r.admission_type,
-    vitals: {
-      spo2: parseFloat2(r.spo2),
-      heart_rate: parseFloat2(r.heart_rate),
-      systolic_bp: parseFloat2(r.systolic_bp),
-      diastolic_bp: parseFloat2(r.diastolic_bp),
-      oxygen_flow: parseFloat2(r.oxygen_flow),
-      temperature: parseFloat2(r.temperature),
-      respiratory_rate: parseFloat2(r.respiratory_rate),
-      respiratory_status: r.respiratory_status || "unknown",
-    },
-    labs: {
-      hemoglobin: parseFloat2(r.hemoglobin),
-      wbc: parseFloat2(r.wbc),
-      rbc: parseFloat2(r.rbc),
-      platelets: parseFloat2(r.platelets),
-      hematocrit: parseFloat2(r.hematocrit),
-      mcv: parseFloat2(r.mcv),
-      mch: parseFloat2(r.mch),
-      mchc: parseFloat2(r.mchc),
-      rdw: parseFloat2(r.rdw),
-      neutrophils: parseFloat2(r.neutrophils),
-      lymphocytes: parseFloat2(r.lymphocytes),
-      monocytes: parseFloat2(r.monocytes),
-      eosinophils: parseFloat2(r.eosinophils),
-      basophils: parseFloat2(r.basophils),
-      creatinine: parseFloat2(r.creatinine),
-      bun: parseFloat2(r.bun),
-      glucose: parseFloat2(r.glucose),
-      sodium: parseFloat2(r.sodium),
-      potassium: parseFloat2(r.potassium),
-      lactate: parseFloat2(r.lactate),
-    },
-    medications: parseArray(r.medications),
-    allergies: parseArray(r.allergies),
-    severity_score: parseInt(r.severity_score) || 5,
-    critical_flag: parseBool(r.critical_flag),
-  }));
-
+  patientsCache = getIngestedPatients();
   return patientsCache;
 }
 
@@ -145,8 +77,7 @@ export function loadPatients(): Patient[] {
  * Get a patient by ID.
  */
 export function getPatient(patientId: string): Patient | null {
-  const patients = loadPatients();
-  return patients.find((p) => p.patient_id === patientId) || null;
+  return loadPatients().find((p) => p.patient_id === patientId) || null;
 }
 
 /**

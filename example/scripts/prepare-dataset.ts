@@ -1,6 +1,8 @@
 /**
  * Prepare unified patient dataset from multiple Kaggle sources.
  *
+ * Uses the same ingest pattern as custom data - dogfooding our own API.
+ *
  * Matching signature: (age_bucket, gender, condition_category)
  * - Age buckets: 18-30, 31-45, 46-60, 61-75, 76+
  * - Gender: normalized to M/F
@@ -12,11 +14,12 @@
  * - Healthcare Dataset: Patient demographics, conditions, medications
  * - CBC Dataset: Complete blood count with diagnoses
  *
- * Output: data/patients.csv
+ * Output: data/ingest.jsonl (via append-only ingest pattern)
  */
 
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { parse } from "csv-parse/sync";
+import { append } from "../src/data/ingest";
 
 // ============================================================================
 // Types
@@ -472,29 +475,71 @@ for (const adm of mimicAdmissions) {
 console.log(`Built ${unifiedPatients.length} unified patient records`);
 
 // ============================================================================
-// Output CSV
+// Output via ingest pattern (dogfooding our own API)
 // ============================================================================
 
-const headers = Object.keys(unifiedPatients[0] || {});
-const csvLines = [
-  headers.join(","),
-  ...unifiedPatients.map((p) =>
-    headers
-      .map((h) => {
-        const val = (p as any)[h];
-        if (val === null || val === undefined) return "";
-        if (typeof val === "string" && (val.includes(",") || val.includes('"')))
-          return `"${val.replace(/"/g, '""')}"`;
-        return String(val);
-      })
-      .join(",")
-  ),
-];
+const ingestPath = `${basePath}data/ingest.jsonl`;
 
-const outputPath = `${basePath}data/patients.csv`;
-writeFileSync(outputPath, csvLines.join("\n"));
+// Clear existing ingest log to start fresh
+if (existsSync(ingestPath)) {
+  unlinkSync(ingestPath);
+  console.log("\nCleared existing ingest.jsonl");
+}
 
-console.log(`\nWrote unified dataset to: ${outputPath}`);
+console.log("Ingesting patients...");
+
+for (const p of unifiedPatients) {
+  // Convert to ingest-friendly format (same shape users would POST)
+  append({
+    id: p.patient_id,
+    age: p.age,
+    gender: p.gender,
+    blood_type: p.blood_type,
+    diagnosis: p.primary_diagnosis,
+    icd9_code: p.icd9_code,
+    secondary_diagnoses: p.secondary_diagnoses.split("|").filter(Boolean),
+    category: p.condition_category,
+    insurance: p.insurance,
+    admission_type: p.admission_type,
+    // Vitals as nested object (like a user might send)
+    spo2: p.spo2,
+    hr: p.heart_rate,
+    bp: p.systolic_bp && p.diastolic_bp ? `${p.systolic_bp}/${p.diastolic_bp}` : null,
+    oxygen_flow: p.oxygen_flow,
+    temp: p.temperature,
+    rr: p.respiratory_rate,
+    respiratory_status: p.respiratory_status,
+    // Labs as nested object
+    labs: {
+      hemoglobin: p.hemoglobin,
+      wbc: p.wbc,
+      rbc: p.rbc,
+      platelets: p.platelets,
+      hematocrit: p.hematocrit,
+      mcv: p.mcv,
+      mch: p.mch,
+      mchc: p.mchc,
+      rdw: p.rdw,
+      neutrophils: p.neutrophils,
+      lymphocytes: p.lymphocytes,
+      monocytes: p.monocytes,
+      eosinophils: p.eosinophils,
+      basophils: p.basophils,
+      creatinine: p.creatinine,
+      bun: p.bun,
+      glucose: p.glucose,
+      sodium: p.sodium,
+      potassium: p.potassium,
+      lactate: p.lactate,
+    },
+    medications: p.medications.split("|").filter(Boolean),
+    allergies: p.allergies ? p.allergies.split("|").filter(Boolean) : [],
+    severity: p.severity_score,
+    critical: p.critical_flag,
+  });
+}
+
+console.log(`\nWrote to: ${ingestPath}`);
 console.log(`  Total patients: ${unifiedPatients.length}`);
 console.log(
   `  Categories: ${[...new Set(unifiedPatients.map((p) => p.condition_category))].join(", ")}`

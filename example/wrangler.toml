@@ -1,0 +1,25 @@
+name = "active-meta-mgt-demo"
+main = "src/worker.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV Namespace for patient data persistence
+# Create with: wrangler kv:namespace create PATIENTS_KV
+# Then update the id below
+kv_namespaces = [
+  { binding = "PATIENTS_KV", id = "7dcc2fb277294c6188597ee51f8af80c" }
+]
+
+[vars]
+# Non-sensitive environment variables can go here
+
+# Static assets configuration
+[assets]
+directory = "./public"
+
+# Development configuration
+[dev]
+port = 8787
+local_protocol = "http"
+
+# For local dev with KV, wrangler will create a local KV store automatically
