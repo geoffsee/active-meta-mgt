@@ -1,3 +1,6 @@
+[![Test](https://github.com/williamseemueller/active-meta-mgt/actions/workflows/test.yml/badge.svg)](https://github.com/williamseemueller/active-meta-mgt/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 # Active Meta-Context Management (Framework)
 
 Theoretical active context management system with context "lanes"; generic enough for broad applications across complex domains.
