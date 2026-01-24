@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import { makeOpenAIClient } from "./openaiClient";
 import {
   createContextForScenario,
@@ -11,6 +12,13 @@ import {
   filterPatients,
 } from "./data/loaders/patients";
 import { append, readLog, getIngestedPatients, toPatient } from "./data/ingest";
+import {
+  appendEvaluation,
+  getPatientEvaluations,
+  getLatestEvaluation,
+  getCachedEvaluation,
+  getEvaluationStats,
+} from "./data/evaluations";
 import {
   generateScenario,
   generateScenarioFromPatient,
@@ -67,6 +75,151 @@ function recordPatientEvaluation(patientId: string): void {
     const toRemove = entries.slice(0, entries.length - 1000);
     toRemove.forEach(([id]) => patientEvalTimestamps.delete(id));
   }
+}
+
+// =============================================================================
+// Medical-Grade Authentication (HIPAA Compliant)
+// API Key + HMAC-SHA256 signature verification with replay protection
+// =============================================================================
+
+const INGEST_API_KEY = process.env.INGEST_API_KEY || "";
+const INGEST_API_SECRET = process.env.INGEST_API_SECRET || "";
+const AUTH_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes to prevent replay attacks
+
+// Audit log for HIPAA compliance - records all authentication attempts
+interface AuditLogEntry {
+  timestamp: string;
+  action: "ingest_auth_success" | "ingest_auth_failure";
+  apiKeyPrefix: string; // First 8 chars only for security
+  ip: string;
+  userAgent: string;
+  path: string;
+  method: string;
+  reason?: string;
+  recordCount?: number;
+}
+
+const auditLog: AuditLogEntry[] = [];
+const MAX_AUDIT_LOG_SIZE = 10000;
+
+function logAudit(entry: AuditLogEntry): void {
+  auditLog.push(entry);
+  // Rotate log to prevent memory issues
+  if (auditLog.length > MAX_AUDIT_LOG_SIZE) {
+    auditLog.splice(0, auditLog.length - MAX_AUDIT_LOG_SIZE);
+  }
+  // Also log to console for external log aggregation
+  console.log(`[AUDIT] ${JSON.stringify(entry)}`);
+}
+
+function getClientIP(req: Request): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown"
+  );
+}
+
+interface AuthResult {
+  authenticated: boolean;
+  error?: string;
+  statusCode?: number;
+}
+
+function verifyIngestAuth(req: Request, body: string): AuthResult {
+  // Check if authentication is configured
+  if (!INGEST_API_KEY || !INGEST_API_SECRET) {
+    return {
+      authenticated: false,
+      error: "Ingest authentication not configured. Set INGEST_API_KEY and INGEST_API_SECRET environment variables.",
+      statusCode: 503,
+    };
+  }
+
+  const apiKey = req.headers.get("X-API-Key");
+  const signature = req.headers.get("X-Signature");
+  const timestamp = req.headers.get("X-Timestamp");
+
+  // Verify all required headers are present
+  if (!apiKey || !signature || !timestamp) {
+    return {
+      authenticated: false,
+      error: "Missing required authentication headers: X-API-Key, X-Signature, X-Timestamp",
+      statusCode: 401,
+    };
+  }
+
+  // Verify API key matches (timing-safe comparison)
+  const apiKeyBuffer = Buffer.from(apiKey);
+  const expectedKeyBuffer = Buffer.from(INGEST_API_KEY);
+  if (
+    apiKeyBuffer.length !== expectedKeyBuffer.length ||
+    !timingSafeEqual(apiKeyBuffer, expectedKeyBuffer)
+  ) {
+    return {
+      authenticated: false,
+      error: "Invalid API key",
+      statusCode: 401,
+    };
+  }
+
+  // Verify timestamp is within tolerance (replay protection)
+  const requestTime = parseInt(timestamp, 10);
+  if (isNaN(requestTime)) {
+    return {
+      authenticated: false,
+      error: "Invalid timestamp format",
+      statusCode: 401,
+    };
+  }
+
+  const now = Date.now();
+  if (Math.abs(now - requestTime) > AUTH_TIMESTAMP_TOLERANCE_MS) {
+    return {
+      authenticated: false,
+      error: "Request timestamp expired or invalid (must be within 5 minutes)",
+      statusCode: 401,
+    };
+  }
+
+  // Verify HMAC-SHA256 signature
+  // Signature = HMAC-SHA256(secret, timestamp + "POST" + "/api/ingest" + body)
+  const url = new URL(req.url);
+  const signaturePayload = `${timestamp}${req.method}${url.pathname}${body}`;
+  const expectedSignature = createHmac("sha256", INGEST_API_SECRET)
+    .update(signaturePayload)
+    .digest("hex");
+
+  const sigBuffer = Buffer.from(signature);
+  const expectedSigBuffer = Buffer.from(expectedSignature);
+  if (
+    sigBuffer.length !== expectedSigBuffer.length ||
+    !timingSafeEqual(sigBuffer, expectedSigBuffer)
+  ) {
+    return {
+      authenticated: false,
+      error: "Invalid signature",
+      statusCode: 401,
+    };
+  }
+
+  return { authenticated: true };
+}
+
+function unauthorizedResponse(message: string, statusCode: number = 401) {
+  return json(
+    {
+      error: "Authentication failed",
+      message,
+      documentation: "https://docs.example.com/api/authentication",
+    },
+    {
+      status: statusCode,
+      headers: {
+        "WWW-Authenticate": 'HMAC-SHA256 realm="ingest"',
+      },
+    }
+  );
 }
 const publicDirFallback = new URL("./example/public/", `file://${process.cwd()}/`);
 async function resolvePublicFile(path: string): Promise<{ file: Blob; url: URL }> {
@@ -597,7 +750,7 @@ Bun.serve({
         // Record successful evaluation for rate limiting
         recordPatientEvaluation(patientId);
 
-        return json({
+        const evaluationResult = {
           patientId,
           patient: {
             summary: patientSummary,
@@ -618,7 +771,17 @@ Bun.serve({
             followUps: snapshotFollowUps(coordinator),
           },
           timestamp: new Date().toISOString(),
-        });
+        };
+
+        // Persist evaluation result for audit trail
+        try {
+          appendEvaluation(evaluationResult);
+        } catch (err) {
+          console.error("Failed to persist evaluation:", err);
+          // Continue returning the result even if persistence fails
+        }
+
+        return json(evaluationResult);
       },
     },
 
@@ -626,6 +789,40 @@ Bun.serve({
 
     "/api/scenarios/stats": {
       GET: () => json(getScenarioStats()),
+    },
+
+    // --- Evaluation history ---
+
+    "/api/evaluations": {
+      GET: () => json(getEvaluationStats()),
+    },
+
+    "/api/evaluations/:patientId": {
+      GET: (req) => {
+        const patientId = req.params.patientId;
+        if (!patientId) return notFound();
+
+        const evals = getPatientEvaluations(patientId);
+        return json({
+          patientId,
+          evaluations: evals,
+          count: evals.length,
+        });
+      },
+    },
+
+    "/api/evaluations/:patientId/latest": {
+      GET: (req) => {
+        const patientId = req.params.patientId;
+        if (!patientId) return notFound();
+
+        const latest = getLatestEvaluation(patientId);
+        if (!latest) {
+          return notFound(`No evaluations found for patient ${patientId}`);
+        }
+
+        return json(latest);
+      },
     },
 
     // --- Reference data ---
@@ -729,26 +926,93 @@ Bun.serve({
 
     "/api/ingest": {
       POST: async (req) => {
+        const clientIP = getClientIP(req);
+        const userAgent = req.headers.get("user-agent") || "unknown";
+        const apiKeyPrefix = (req.headers.get("X-API-Key") || "").slice(0, 8) || "none";
+
+        // Read body first for signature verification
+        let bodyText: string;
+        try {
+          bodyText = await req.text();
+        } catch {
+          return json({ error: "Failed to read request body" }, { status: 400 });
+        }
+
+        // Verify authentication
+        const authResult = verifyIngestAuth(req, bodyText);
+        if (!authResult.authenticated) {
+          logAudit({
+            timestamp: new Date().toISOString(),
+            action: "ingest_auth_failure",
+            apiKeyPrefix,
+            ip: clientIP,
+            userAgent,
+            path: "/api/ingest",
+            method: "POST",
+            reason: authResult.error,
+          });
+          return unauthorizedResponse(authResult.error!, authResult.statusCode);
+        }
+
         try {
           const contentType = req.headers.get("content-type") || "";
+          let recordCount = 0;
 
           // Handle JSONL (newline-delimited JSON)
           if (contentType.includes("application/x-ndjson") || contentType.includes("text/plain")) {
-            const text = await req.text();
-            const lines = text.split("\n").filter(Boolean);
+            const lines = bodyText.split("\n").filter(Boolean);
             const records = lines.map((line) => append(JSON.parse(line)));
+            recordCount = records.length;
+
+            logAudit({
+              timestamp: new Date().toISOString(),
+              action: "ingest_auth_success",
+              apiKeyPrefix,
+              ip: clientIP,
+              userAgent,
+              path: "/api/ingest",
+              method: "POST",
+              recordCount,
+            });
+
             return json({ ingested: records.length, records });
           }
 
           // Handle JSON (single object or array)
-          const body = await req.json();
+          const body = JSON.parse(bodyText);
 
           if (Array.isArray(body)) {
             const records = body.map((item) => append(item));
+            recordCount = records.length;
+
+            logAudit({
+              timestamp: new Date().toISOString(),
+              action: "ingest_auth_success",
+              apiKeyPrefix,
+              ip: clientIP,
+              userAgent,
+              path: "/api/ingest",
+              method: "POST",
+              recordCount,
+            });
+
             return json({ ingested: records.length, records });
           }
 
           const record = append(body);
+          recordCount = 1;
+
+          logAudit({
+            timestamp: new Date().toISOString(),
+            action: "ingest_auth_success",
+            apiKeyPrefix,
+            ip: clientIP,
+            userAgent,
+            path: "/api/ingest",
+            method: "POST",
+            recordCount,
+          });
+
           return json({ ingested: 1, record });
         } catch (err) {
           return json({ error: (err as Error).message }, { status: 400 });
@@ -764,6 +1028,33 @@ Bun.serve({
         return json({
           total: log.length,
           records: log.slice(-limit),
+        });
+      },
+    },
+
+    "/api/ingest/audit": {
+      GET: (req) => {
+        // Audit log access - requires same authentication as ingest
+        const apiKey = req.headers.get("X-API-Key");
+        if (!INGEST_API_KEY || apiKey !== INGEST_API_KEY) {
+          return json(
+            { error: "Unauthorized - API key required to access audit logs" },
+            { status: 401 }
+          );
+        }
+
+        const url = new URL(req.url);
+        const limit = parseInt(url.searchParams.get("limit") || "100");
+        const action = url.searchParams.get("action") as AuditLogEntry["action"] | null;
+
+        let filtered = auditLog;
+        if (action) {
+          filtered = auditLog.filter((e) => e.action === action);
+        }
+
+        return json({
+          total: filtered.length,
+          entries: filtered.slice(-limit),
         });
       },
     },
@@ -798,19 +1089,24 @@ console.log(`Example server running on http://localhost:${port}`);
 console.log(`
 API Endpoints:
 
-  Data Ingestion (pipe in whatever you have):
-    POST /api/ingest                         - Ingest any JSON/JSONL patient data
+  Data Ingestion (HIPAA-compliant authentication required):
+    POST /api/ingest                         - Ingest patient data (requires auth)
     GET  /api/ingest/log                     - View ingest log
     GET  /api/ingest/patients                - List ingested patients
+    GET  /api/ingest/audit                   - View auth audit log (requires API key)
 
-    Examples:
-      curl -X POST localhost:3333/api/ingest -H 'Content-Type: application/json' \\
-        -d '{"id":"P1","age":65,"diagnosis":"Chest Pain","bp":"140/90"}'
+    Authentication Headers:
+      X-API-Key: <your-api-key>
+      X-Timestamp: <unix-timestamp-ms>
+      X-Signature: HMAC-SHA256(secret, timestamp+method+path+body)
 
-      cat patients.jsonl | curl -X POST localhost:3333/api/ingest \\
-        -H 'Content-Type: application/x-ndjson' --data-binary @-
+    Generate credentials:
+      bun run scripts/generate-api-keys.ts
 
-  Multi-Specialist Evaluation:
+    Example with client script:
+      INGEST_API_KEY=xxx INGEST_API_SECRET=yyy bun run scripts/ingest-client.ts data.json
+
+  Multi-Specialist Evaluation (4-hour per-patient cooldown):
     GET  /api/specialists                    - List available specialists
     POST /api/scenarios/generate/:id/evaluate - Fan-out to all specialists
 

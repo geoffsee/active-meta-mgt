@@ -8,7 +8,6 @@
     "probe": "bun run src/main.ts",
     "dev:worker": "wrangler dev",
     "deploy": "wrangler deploy",
-    "build:worker": "echo 'Build handled by wrangler'",
     "cf:kv:create": "wrangler kv:namespace create PATIENTS_KV && wrangler kv:namespace create PATIENTS_KV --preview",
     "cf:secret:set": "wrangler secret put OPENAI_API_KEY"
   },

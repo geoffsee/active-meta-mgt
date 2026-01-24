@@ -47,3 +47,4 @@ example/data/reference-ranges.json
 
 # Wrangler (Cloudflare Workers)
 .wrangler/
+/example/.dev.vars
