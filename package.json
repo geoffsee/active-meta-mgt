@@ -41,7 +41,8 @@
     "build": "bun build ./index.ts ./custom_tokenizer.ts --outdir ./dist --target node --external mobx-state-tree --external @huggingface/transformers",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "dev": "(cd example && wrangler dev)"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

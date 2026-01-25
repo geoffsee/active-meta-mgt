@@ -25,7 +25,7 @@ struct ContentView: View {
                         Text("Patient: \(Config.patientId)")
                             .font(.headline)
                     }
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .padding(.bottom, 4)
 
                     // Vitals grid
@@ -75,7 +75,7 @@ struct ContentView: View {
                     if let lastRefresh = healthKit.lastRefresh {
                         Text("Updated \(lastRefresh, formatter: timeFormatter)")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.textSecondary)
                     }
 
                     Divider()
@@ -123,7 +123,7 @@ struct ContentView: View {
                     if let result = apiClient.lastResult {
                         HStack {
                             Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundColor(result.success ? .green : .red)
+                                .foregroundColor(result.success ? AppColors.statusNormal : AppColors.statusCritical)
                             Text(result.message)
                                 .font(.caption)
                                 .lineLimit(2)
@@ -136,7 +136,7 @@ struct ContentView: View {
                     if !Config.isConfigured {
                         HStack {
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.yellow)
+                                .foregroundColor(AppColors.statusWarning)
                             Text("API not configured")
                                 .font(.caption)
                         }
@@ -177,17 +177,18 @@ struct ContentView: View {
 
             Text(label)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
 
             Spacer()
 
             Text(value)
                 .font(.system(.body, design: .rounded))
                 .fontWeight(.semibold)
+                .foregroundColor(AppColors.textPrimary)
 
             Text(unit)
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
         }
     }
 

@@ -85,7 +85,7 @@ struct ManualEntryView: View {
 
                                 Text("/")
                                     .font(.title2)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(AppColors.textSecondary)
 
                                 VStack {
                                     Text("Diastolic")
@@ -103,7 +103,7 @@ struct ManualEntryView: View {
                         }
                     }
                     .padding()
-                    .background(Color(.systemGray6))
+                    .background(AppColors.backgroundSecondary)
                     .cornerRadius(10)
 
                     // Respiratory Rate
@@ -202,12 +202,12 @@ struct ManualEntryView: View {
 
                     Text(unit)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
             }
         }
         .padding()
-        .background(Color(.systemGray6))
+        .background(AppColors.backgroundSecondary)
         .cornerRadius(10)
     }
 

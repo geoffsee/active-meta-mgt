@@ -129,7 +129,68 @@ struct Config {
 
 ## Testing
 
-### In Simulator
+### Automated Testing
+
+VitalsWatch includes two layers of automated testing:
+
+#### Layer 1: API Contract Tests (TypeScript/Bun)
+
+Fast, CI-friendly tests that verify the server API behaves correctly:
+
+```bash
+cd /path/to/example
+
+# Start the server (in one terminal)
+bun run src/server.ts
+
+# Run API contract tests (in another terminal)
+bun test src/__tests__/integration
+```
+
+The tests cover:
+- Authentication flows (valid/invalid credentials, missing headers)
+- Payload validation (hasVitals check, required fields)
+- Patient ID enforcement from credentials
+- End-to-end flow: import → submit → verify in log
+
+#### Layer 2: watchOS Simulator UI Tests
+
+End-to-end tests that run on the actual watchOS simulator:
+
+```bash
+cd /path/to/example/wearable
+
+# Run automated watchOS UI tests
+./scripts/run-watch-tests.sh
+```
+
+The script handles:
+- Finding and booting a watchOS simulator
+- Optionally starting the backend server
+- Building and running XCUITests
+- Cleanup (simulator shutdown, server stop)
+
+Options:
+- `--no-server` - Skip starting the backend server
+- `--keep-sim` - Don't shutdown simulator after tests
+- `--verbose` - Show detailed output
+
+**Prerequisites for UI tests:**
+1. Xcode with watchOS SDK
+2. watchOS runtime: `xcodebuild -downloadPlatform watchOS`
+3. VitalsWatch.xcodeproj (see Setup Instructions below)
+4. UI test target added to project (see Step 7)
+
+#### One-Time: Add UI Test Target to Xcode Project
+
+After creating the VitalsWatch project:
+
+1. **File → New → Target → watchOS → UI Testing Bundle**
+2. Name: `VitalsWatchUITests`
+3. Target to Test: `VitalsWatch Watch App`
+4. Add `VitalsWatchUITests/VitalsWatchUITests.swift` to the test target
+
+### Manual Testing in Simulator
 
 The watchOS simulator doesn't have real HealthKit data, but you can:
 
@@ -137,7 +198,7 @@ The watchOS simulator doesn't have real HealthKit data, but you can:
 2. Submit to verify API connectivity
 3. Check server logs for received data
 
-### On Physical Device
+### Manual Testing on Physical Device
 
 1. Pair your Apple Watch with the development Mac
 2. Build to the physical watch
