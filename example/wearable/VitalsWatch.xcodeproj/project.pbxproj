@@ -13,6 +13,7 @@
 		A1000003001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* Assets.xcassets */; };
 		A1000004001 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004000 /* Config.swift */; };
 		A1000005001 /* VitalTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000005000 /* VitalTypes.swift */; };
+		A1000007001 /* WatchConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000007000 /* WatchConnectivityManager.swift */; };
 
 		/* watchOS App - VitalsWatch Watch App */
 		A2000001001 /* VitalsWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000 /* VitalsWatchApp.swift */; };
@@ -25,6 +26,8 @@
 		A2000008001 /* VitalTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000005000 /* VitalTypes.swift */; };
 
 		A2000011001 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011000 /* Theme.swift */; };
+		A2000012001 /* WatchConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012000 /* WatchConnectivityManager.swift */; };
+		A2000013001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013000 /* SettingsView.swift */; };
 
 		/* UI Tests */
 		A3000001001 /* VitalsWatchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000001000 /* VitalsWatchUITests.swift */; };
@@ -54,6 +57,7 @@
 		A1000002000 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A1000003000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000006000 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A1000007000 /* WatchConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchConnectivityManager.swift; sourceTree = "<group>"; };
 
 		/* Shared */
 		A1000004000 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
@@ -70,6 +74,8 @@
 		A2000009000 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000010000 /* VitalsWatch Watch App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "VitalsWatch Watch App.entitlements"; sourceTree = "<group>"; };
 		A2000011000 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A2000012000 /* WatchConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchConnectivityManager.swift; sourceTree = "<group>"; };
+		A2000013000 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 
 		/* UI Tests */
 		A0000005000 /* VitalsWatchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VitalsWatchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -126,6 +132,7 @@
 			children = (
 				A1000001000 /* VitalsWatchApp.swift */,
 				A1000002000 /* ContentView.swift */,
+				A1000007000 /* WatchConnectivityManager.swift */,
 				A1000003000 /* Assets.xcassets */,
 				A1000006000 /* Info.plist */,
 			);
@@ -140,7 +147,9 @@
 				A2000003000 /* HealthKitManager.swift */,
 				A2000004000 /* APIClient.swift */,
 				A2000005000 /* ManualEntryView.swift */,
+				A2000013000 /* SettingsView.swift */,
 				A2000011000 /* Theme.swift */,
+				A2000012000 /* WatchConnectivityManager.swift */,
 				A2000006000 /* Assets.xcassets */,
 				A2000009000 /* Info.plist */,
 				A2000010000 /* VitalsWatch Watch App.entitlements */,
@@ -300,6 +309,7 @@
 				A1000002001 /* ContentView.swift in Sources */,
 				A1000004001 /* Config.swift in Sources */,
 				A1000005001 /* VitalTypes.swift in Sources */,
+				A1000007001 /* WatchConnectivityManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -312,7 +322,9 @@
 				A2000003001 /* HealthKitManager.swift in Sources */,
 				A2000004001 /* APIClient.swift in Sources */,
 				A2000005001 /* ManualEntryView.swift in Sources */,
+				A2000013001 /* SettingsView.swift in Sources */,
 				A2000011001 /* Theme.swift in Sources */,
+				A2000012001 /* WatchConnectivityManager.swift in Sources */,
 				A2000007001 /* Config.swift in Sources */,
 				A2000008001 /* VitalTypes.swift in Sources */,
 			);

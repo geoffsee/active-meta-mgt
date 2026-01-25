@@ -2,9 +2,11 @@ import SwiftUI
 
 /// Main view displaying current vitals and submission controls
 struct ContentView: View {
+    @EnvironmentObject var connectivityManager: WatchConnectivityManager
     @StateObject private var healthKit = HealthKitManager()
     @StateObject private var apiClient = APIClient()
     @State private var showManualEntry = false
+    @State private var showSettings = false
     @State private var showingResult = false
 
     // Manual override values
@@ -22,7 +24,7 @@ struct ContentView: View {
                     // Patient ID header
                     HStack {
                         Image(systemName: "person.fill")
-                        Text("Patient: \(Config.patientId)")
+                        Text("Patient: \(connectivityManager.currentPatientId)")
                             .font(.headline)
                     }
                     .foregroundColor(AppColors.textSecondary)
@@ -133,13 +135,18 @@ struct ContentView: View {
                     }
 
                     // Configuration warning
-                    if !Config.isConfigured {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(AppColors.statusWarning)
-                            Text("API not configured")
-                                .font(.caption)
+                    if !connectivityManager.isConfigured {
+                        Button {
+                            showSettings = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(AppColors.statusWarning)
+                                Text("Tap to configure")
+                                    .font(.caption)
+                            }
                         }
+                        .buttonStyle(.plain)
                         .padding(.top, 4)
                     }
                 }
@@ -147,6 +154,15 @@ struct ContentView: View {
             }
             .navigationTitle("Vitals")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
             .onAppear {
                 Task {
                     await healthKit.requestAuthorization()
@@ -163,6 +179,10 @@ struct ContentView: View {
                     temperature: $manualTemperature,
                     healthKit: healthKit
                 )
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+                    .environmentObject(connectivityManager)
             }
         }
     }
