@@ -12,6 +12,7 @@ import {
   filterPatients,
 } from "./data/loaders/patients";
 import { append, readLog, getIngestedPatients, toPatient } from "./data/ingest";
+import { parseAndAlignCases } from "./data/importer";
 import {
   appendEvaluation,
   getPatientEvaluations,
@@ -80,11 +81,91 @@ function recordPatientEvaluation(patientId: string): void {
 // =============================================================================
 // Medical-Grade Authentication (HIPAA Compliant)
 // API Key + HMAC-SHA256 signature verification with replay protection
+// Also supports case-based username/password authentication for wearables
 // =============================================================================
 
 const INGEST_API_KEY = process.env.INGEST_API_KEY || "";
 const INGEST_API_SECRET = process.env.INGEST_API_SECRET || "";
 const AUTH_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes to prevent replay attacks
+
+// Case credentials storage (populated from import)
+const caseCredentials = new Map<string, { password: string; patientId: string }>();
+
+/**
+ * Load existing case credentials from the ingest log on startup
+ */
+function loadCaseCredentials(): void {
+  const log = readLog();
+  for (const record of log) {
+    const username = record.username as string | undefined;
+    const password = record.password as string | undefined;
+    const patientId = record.patient_id as string | undefined;
+    if (username && password && patientId) {
+      caseCredentials.set(username, { password, patientId });
+    }
+  }
+  if (caseCredentials.size > 0) {
+    console.log(`[AUTH] Loaded ${caseCredentials.size} case credentials from ingest log`);
+  }
+}
+
+// Load credentials on module init
+loadCaseCredentials();
+
+/**
+ * Register new case credentials (called after import)
+ */
+function registerCaseCredentials(username: string, password: string, patientId: string): void {
+  caseCredentials.set(username, { password, patientId });
+}
+
+/**
+ * Verify case-based authentication (username/password via Basic Auth or headers)
+ */
+function verifyCaseAuth(req: Request): { authenticated: boolean; patientId?: string; error?: string } {
+  // Try Basic Auth header first
+  const authHeader = req.headers.get("Authorization");
+  if (authHeader?.startsWith("Basic ")) {
+    const base64 = authHeader.slice(6);
+    const decoded = Buffer.from(base64, "base64").toString("utf-8");
+    const [username, password] = decoded.split(":");
+
+    const cred = caseCredentials.get(username);
+    if (!cred) {
+      return { authenticated: false, error: "Unknown case username" };
+    }
+
+    // Timing-safe comparison
+    const passBuffer = Buffer.from(password || "");
+    const expectedBuffer = Buffer.from(cred.password);
+    if (passBuffer.length !== expectedBuffer.length || !timingSafeEqual(passBuffer, expectedBuffer)) {
+      return { authenticated: false, error: "Invalid password" };
+    }
+
+    return { authenticated: true, patientId: cred.patientId };
+  }
+
+  // Try custom headers (X-Case-Username, X-Case-Password)
+  const username = req.headers.get("X-Case-Username");
+  const password = req.headers.get("X-Case-Password");
+
+  if (username && password) {
+    const cred = caseCredentials.get(username);
+    if (!cred) {
+      return { authenticated: false, error: "Unknown case username" };
+    }
+
+    const passBuffer = Buffer.from(password);
+    const expectedBuffer = Buffer.from(cred.password);
+    if (passBuffer.length !== expectedBuffer.length || !timingSafeEqual(passBuffer, expectedBuffer)) {
+      return { authenticated: false, error: "Invalid password" };
+    }
+
+    return { authenticated: true, patientId: cred.patientId };
+  }
+
+  return { authenticated: false, error: "No case credentials provided" };
+}
 
 // Audit log for HIPAA compliance - records all authentication attempts
 interface AuditLogEntry {
@@ -126,25 +207,59 @@ interface AuthResult {
   statusCode?: number;
 }
 
-function verifyIngestAuth(req: Request, body: string): AuthResult {
-  // Check if authentication is configured
-  if (!INGEST_API_KEY || !INGEST_API_SECRET) {
-    return {
-      authenticated: false,
-      error: "Ingest authentication not configured. Set INGEST_API_KEY and INGEST_API_SECRET environment variables.",
-      statusCode: 503,
-    };
+function verifyIngestAuth(req: Request, body: string): AuthResult & { patientId?: string } {
+  // First, try case-based authentication (for wearables)
+  const caseAuth = verifyCaseAuth(req);
+  if (caseAuth.authenticated) {
+    return { authenticated: true, patientId: caseAuth.patientId };
   }
 
+  // Then try HMAC authentication
   const apiKey = req.headers.get("X-API-Key");
   const signature = req.headers.get("X-Signature");
   const timestamp = req.headers.get("X-Timestamp");
 
-  // Verify all required headers are present
+  // If no HMAC headers and case auth failed, return appropriate error
+  if (!apiKey && !signature && !timestamp) {
+    // Check if case auth was attempted
+    if (req.headers.get("Authorization") || req.headers.get("X-Case-Username")) {
+      return {
+        authenticated: false,
+        error: caseAuth.error || "Case authentication failed",
+        statusCode: 401,
+      };
+    }
+
+    // Check if HMAC auth is configured
+    if (!INGEST_API_KEY || !INGEST_API_SECRET) {
+      return {
+        authenticated: false,
+        error: "Authentication required. Use case credentials (Basic Auth) or HMAC signature.",
+        statusCode: 401,
+      };
+    }
+
+    return {
+      authenticated: false,
+      error: "Missing authentication. Use case credentials (Basic Auth) or HMAC headers (X-API-Key, X-Signature, X-Timestamp)",
+      statusCode: 401,
+    };
+  }
+
+  // HMAC auth attempted - check if configured
+  if (!INGEST_API_KEY || !INGEST_API_SECRET) {
+    return {
+      authenticated: false,
+      error: "HMAC authentication not configured. Use case credentials instead.",
+      statusCode: 503,
+    };
+  }
+
+  // Verify all HMAC headers are present
   if (!apiKey || !signature || !timestamp) {
     return {
       authenticated: false,
-      error: "Missing required authentication headers: X-API-Key, X-Signature, X-Timestamp",
+      error: "Missing required HMAC authentication headers: X-API-Key, X-Signature, X-Timestamp",
       statusCode: 401,
     };
   }
@@ -1165,10 +1280,22 @@ Bun.serve({
           const contentType = req.headers.get("content-type") || "";
           let recordCount = 0;
 
+          // If authenticated via case credentials, enforce the patient_id
+          const casePatientId = authResult.patientId;
+
+          // Helper to enforce patient_id for case auth
+          const enforcePatientId = (item: Record<string, unknown>) => {
+            if (casePatientId) {
+              // Override or set patient_id to the authenticated case's patient
+              return { ...item, patient_id: casePatientId };
+            }
+            return item;
+          };
+
           // Handle JSONL (newline-delimited JSON)
           if (contentType.includes("application/x-ndjson") || contentType.includes("text/plain")) {
             const lines = bodyText.split("\n").filter(Boolean);
-            const records = lines.map((line) => append(JSON.parse(line)));
+            const records = lines.map((line) => append(enforcePatientId(JSON.parse(line))));
             recordCount = records.length;
 
             logAudit({
@@ -1189,7 +1316,7 @@ Bun.serve({
           const body = JSON.parse(bodyText);
 
           if (Array.isArray(body)) {
-            const records = body.map((item) => append(item));
+            const records = body.map((item) => append(enforcePatientId(item)));
             recordCount = records.length;
 
             logAudit({
@@ -1206,7 +1333,7 @@ Bun.serve({
             return logAndReturn(json({ ingested: records.length, records }));
           }
 
-          const record = append(body);
+          const record = append(enforcePatientId(body));
           recordCount = 1;
 
           logAudit({
@@ -1281,6 +1408,67 @@ Bun.serve({
             critical: p.critical_flag,
           })),
         });
+      },
+    },
+
+    "/api/import": {
+      POST: async (req) => {
+        const start = performance.now();
+        const url = new URL(req.url);
+        const logAndReturn = (response: Response) => {
+          logRequest({
+            timestamp: new Date().toISOString(),
+            method: req.method,
+            path: url.pathname,
+            status: response.status,
+            durationMs: Math.round(performance.now() - start),
+            ip: getClientIP(req),
+            userAgent: req.headers.get("user-agent") || "unknown",
+          });
+          return response;
+        };
+
+        let body: any;
+        try {
+          body = await req.json();
+        } catch {
+          return logAndReturn(badRequest("Invalid JSON body"));
+        }
+
+        const content = body?.content;
+        const format = body?.format as "json" | "csv" | undefined;
+
+        if (!content || typeof content !== "string") {
+          return logAndReturn(badRequest("content (string) is required"));
+        }
+
+        try {
+          const aligned = parseAndAlignCases(content, format);
+          const records = aligned.map((c) => append(c.aligned));
+
+          // Register credentials for case-based authentication
+          for (const c of aligned) {
+            registerCaseCredentials(
+              c.credentials.username,
+              c.credentials.password,
+              c.aligned.patient_id as string
+            );
+          }
+
+          return logAndReturn(
+            json({
+              ingested: records.length,
+              cases: aligned.map((c, i) => ({
+                patientId: c.aligned.patient_id,
+                username: c.credentials.username,
+                password: c.credentials.password,
+                timestamp: records[i]?._ts,
+              })),
+            })
+          );
+        } catch (err) {
+          return logAndReturn(json({ error: (err as Error).message }, { status: 400 }));
+        }
       },
     },
   },

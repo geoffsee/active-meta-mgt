@@ -31,6 +31,18 @@ import { icdToScenario, getMappedIcdCodes } from "./data/reference/icdMapping";
 import { drugConstraints } from "./data/reference/drugRules";
 import type { Patient } from "./data/loaders/patients";
 import OpenAI from "openai";
+import { parseAndAlignCases } from "./data/importer";
+import { Buffer } from "node:buffer";
+
+// Polyfill Buffer for the Workers runtime (used by third-party libs)
+// Cloudflare Workers doesn’t expose Buffer globally.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+if (typeof globalThis.Buffer === "undefined") {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  globalThis.Buffer = Buffer;
+}
 
 // --------------------------------------------------------------------------
 // Types
@@ -1390,6 +1402,44 @@ app.post("/api/ingest", async (c) => {
     }).catch(() => {});
 
     return c.json({ ingested: 1, record });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+});
+
+// Import (align + ingest) - no auth, intended for demo UI
+app.post("/api/import", async (c) => {
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const content = body?.content;
+  const format = body?.format as "json" | "csv" | undefined;
+
+  if (!content || typeof content !== "string") {
+    return c.json({ error: "content (string) is required" }, 400);
+  }
+
+  try {
+    const aligned = parseAndAlignCases(content, format);
+    const records = [];
+
+    for (const cased of aligned) {
+      records.push(await appendToKV(c.env.PATIENTS_KV, cased.aligned));
+    }
+
+    return c.json({
+      ingested: records.length,
+      cases: aligned.map((cased, idx) => ({
+        patientId: cased.aligned.patient_id,
+        username: cased.credentials.username,
+        password: cased.credentials.password,
+        timestamp: records[idx]?._ts,
+      })),
+    });
   } catch (err) {
     return c.json({ error: (err as Error).message }, 400);
   }

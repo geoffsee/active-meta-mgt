@@ -74,7 +74,9 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 12px;
     }
+    .drawer-title { display: flex; flex-direction: column; gap: 2px; }
     .drawer-panel-header h2 {
       font-size: 13px;
       color: #999;
@@ -82,6 +84,8 @@
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
+    .drawer-subtitle { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
+    .drawer-actions { display: flex; align-items: center; gap: 8px; }
     .drawer-close {
       background: transparent;
       border: none;
@@ -111,6 +115,24 @@
     .drawer-resize.dragging {
       background: #f6c343;
     }
+
+    .add-case-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #f6c343, #f1b933);
+      color: #000;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border: 1px solid #1f1f1f;
+      box-shadow: 0 6px 14px rgba(0,0,0,0.35);
+    }
+    .add-case-btn .plus { background: #000; color: #f6c343; border-radius: 999px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; font-weight: 900; }
+    .add-case-btn:hover { background: linear-gradient(135deg, #f7d06b, #f6c343); }
     .case-list { list-style: none; }
     .case-list li {
       padding: 8px 10px;
@@ -424,6 +446,54 @@
     button:disabled { background: #333; color: #666; cursor: not-allowed; }
     button.secondary { background: #222; color: #999; }
     button.secondary:hover { background: #333; }
+    input, select, textarea {
+      width: 100%;
+      background: #0a0a0a;
+      border: 1px solid #222;
+      color: #e5e5e5;
+      border-radius: 6px;
+      padding: 9px 10px;
+      font-size: 12px;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    textarea { resize: vertical; min-height: 120px; }
+    label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #777; margin-bottom: 6px; }
+    .field { margin-bottom: 12px; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .helper-text { font-size: 11px; color: #777; margin-top: 6px; }
+    .error-text { color: #fca5a5; font-size: 12px; }
+    .success-text { color: #86efac; font-size: 12px; }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      padding: 12px;
+    }
+    .modal-backdrop.visible { display: flex; }
+    .modal {
+      background: #0d0d0d;
+      border: 1px solid #1f1f1f;
+      border-radius: 10px;
+      width: min(760px, 100%);
+      box-shadow: 0 20px 50px rgba(0,0,0,0.55);
+    }
+    .modal-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid #1f1f1f;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .modal-title { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #f6c343; }
+    .modal-subtitle { font-size: 12px; color: #888; }
+    .modal-body { padding: 14px 16px 4px; }
+    .modal-actions { padding: 14px 16px 16px; display: flex; justify-content: flex-end; gap: 10px; }
+    .status-line { display: flex; align-items: center; justify-content: space-between; min-height: 20px; margin-top: 4px; }
 
     .actions { display: flex; gap: 10px; margin-top: 16px; }
 
@@ -501,13 +571,183 @@
   <!-- Drawer panel -->
   <div class="drawer-panel" id="drawer-panel">
     <div class="drawer-panel-header">
-      <h2>Select Case</h2>
-      <button class="drawer-close" id="drawer-close">&times;</button>
+      <div class="drawer-title">
+        <h2>Select Case</h2>
+        <div class="drawer-subtitle">Manage cases</div>
+      </div>
+      <div class="drawer-actions">
+        <button class="secondary" id="import-btn">Import</button>
+        <button class="add-case-btn" id="add-case-btn"><span class="plus">+</span> Add Case</button>
+        <button class="drawer-close" id="drawer-close" aria-label="Close cases panel">&times;</button>
+      </div>
     </div>
     <div class="drawer-content">
       <ul class="case-list" id="case-list"></ul>
     </div>
     <div class="drawer-resize" id="drawer-resize"></div>
+  </div>
+
+  <!-- Add Case Modal -->
+  <div class="modal-backdrop" id="add-case-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-case-title">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="add-case-title">Add Case</div>
+          <div class="modal-subtitle">Creates a new patient entry via /api/ingest</div>
+        </div>
+        <button class="drawer-close" id="add-case-close" aria-label="Close add case dialog">&times;</button>
+      </div>
+      <form id="add-case-form">
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field">
+              <label for="patient-id">Patient ID</label>
+              <input id="patient-id" name="patientId" type="text" placeholder="auto-generate if empty" />
+            </div>
+            <div class="field">
+              <label for="primary-dx">Primary Diagnosis</label>
+              <input id="primary-dx" name="primaryDiagnosis" type="text" placeholder="e.g., Acute pneumonia" required />
+            </div>
+            <div class="field">
+              <label for="category">Category</label>
+              <select id="category" name="category">
+                <option value="infectious">Infectious</option>
+                <option value="cardiac">Cardiac</option>
+                <option value="respiratory">Respiratory</option>
+                <option value="metabolic">Metabolic</option>
+                <option value="gi">GI</option>
+                <option value="neuro">Neuro</option>
+                <option value="trauma">Trauma</option>
+                <option value="oncology">Oncology</option>
+                <option value="other" selected>Other</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="admission-type">Admission Type</label>
+              <select id="admission-type" name="admissionType">
+                <option value="EMERGENCY">Emergency</option>
+                <option value="URGENT">Urgent</option>
+                <option value="ELECTIVE">Elective</option>
+                <option value="UNKNOWN" selected>Unknown</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="age">Age</label>
+              <input id="age" name="age" type="number" min="0" max="110" placeholder="65" />
+            </div>
+            <div class="field">
+              <label for="gender">Gender</label>
+              <select id="gender" name="gender">
+                <option value="M">Male</option>
+                <option value="F">Female</option>
+                <option value="U" selected>Unknown</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="severity">Severity (1-10)</label>
+              <input id="severity" name="severity" type="number" min="1" max="10" step="1" placeholder="6" />
+            </div>
+            <div class="field" style="display:flex;align-items:center;gap:8px;margin-bottom:0;">
+              <input id="critical" name="critical" type="checkbox" style="width:auto;" />
+              <label for="critical" style="margin:0;">Mark as critical</label>
+            </div>
+          </div>
+          <div class="helper-text">If ingest authentication is enabled, be sure the server exposes /api/ingest to this UI. This form sends a single JSON record.</div>
+          <div class="status-line" id="add-case-status"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="add-case-cancel">Cancel</button>
+      <button type="submit">Save Case</button>
+    </div>
+  </form>
+</div>
+</div>
+
+  <!-- Import Modal -->
+  <div class="modal-backdrop" id="import-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="import-title">Import Cases</div>
+          <div class="modal-subtitle">Paste JSON or CSV to align and ingest</div>
+        </div>
+        <button class="drawer-close" id="import-close" aria-label="Close import dialog">&times;</button>
+      </div>
+      <form id="import-form">
+        <div class="modal-body">
+          <div class="field">
+            <label for="import-format">Format</label>
+            <select id="import-format" name="format">
+              <option value="auto">Auto-detect</option>
+              <option value="json">JSON</option>
+              <option value="csv">CSV</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="import-content">Document</label>
+            <textarea id="import-content" name="content" placeholder='Example JSON: [{"patient_id":"P900","primary_diagnosis":"COPD exacerbation",...}]'></textarea>
+          </div>
+          <div class="helper-text">Credentials are generated automatically per case and returned after import.</div>
+          <div class="status-line" id="import-status"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="import-cancel">Cancel</button>
+          <button type="submit">Import</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Versions Modal -->
+  <div class="modal-backdrop" id="versions-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="versions-title">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="versions-title">Evaluation Versions</div>
+          <div class="modal-subtitle" id="versions-subtitle">History for selected patient</div>
+        </div>
+        <button class="drawer-close" id="versions-close" aria-label="Close versions dialog">&times;</button>
+      </div>
+      <div class="modal-body" style="max-height:400px;overflow-y:auto;">
+        <div id="versions-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="versions-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Apple Watch Import Modal -->
+  <div class="modal-backdrop" id="watch-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="watch-title">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="watch-title">Import Apple Watch Data</div>
+          <div class="modal-subtitle">Import vitals from Apple Health export</div>
+        </div>
+        <button class="drawer-close" id="watch-close" aria-label="Close watch import dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="watch-file">Apple Health Export (XML)</label>
+          <input type="file" id="watch-file" accept=".xml,.zip" style="padding:8px 0;" />
+          <div class="helper-text">Export from iPhone: Health App → Profile → Export All Health Data</div>
+        </div>
+        <div class="field">
+          <label>Or paste health data (JSON/XML)</label>
+          <textarea id="watch-content" placeholder='{"heart_rate": 72, "spo2": 98, "blood_pressure": "120/80"}'></textarea>
+        </div>
+        <div id="watch-preview" style="display:none;margin-top:12px;">
+          <label>Parsed Vitals</label>
+          <div id="watch-vitals" class="clinical-data" style="background:#111;padding:12px;border-radius:6px;margin-top:6px;"></div>
+        </div>
+        <div class="status-line" id="watch-status"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="watch-cancel">Cancel</button>
+        <button type="button" id="watch-apply" disabled>Apply to Case</button>
+      </div>
+    </div>
   </div>
 
   <main>
@@ -571,7 +811,7 @@
           <div id="demographics-info" class="clinical-data"></div>
         </div>
         <div class="clinical-section">
-          <h3>Vitals <span class="count" id="vitals-count"></span></h3>
+          <h3>Vitals <span class="count" id="vitals-count"></span> <button id="watch-import-btn" class="secondary" style="float:right;padding:2px 8px;font-size:10px;">⌚ Import</button></h3>
           <div id="vitals-info" class="clinical-data"></div>
         </div>
         <div class="clinical-section">
@@ -618,6 +858,7 @@
           <button id="evaluate-btn">Evaluate Case</button>
           <button id="refresh-btn" class="secondary" style="display:none;">Refresh (bypass cache)</button>
           <span id="cache-indicator" style="display:none;font-size:11px;color:#86efac;flex:1;text-align:center;"></span>
+          <button id="versions-btn" class="secondary">Versions</button>
           <button id="export-btn" class="secondary">Export All (JSON)</button>
         </div>
       </div>
@@ -647,6 +888,20 @@
     const findingsCount = $('findings-count');
     const conflictsCount = $('conflicts-count');
     const followupsCount = $('followups-count');
+    const addCaseModal = $('add-case-modal');
+    const addCaseForm = $('add-case-form');
+    const addCaseBtn = $('add-case-btn');
+    const addCaseClose = $('add-case-close');
+    const addCaseCancel = $('add-case-cancel');
+    const addCaseStatus = $('add-case-status');
+    const importModal = $('import-modal');
+    const importForm = $('import-form');
+    const importBtn = $('import-btn');
+    const importClose = $('import-close');
+    const importCancel = $('import-cancel');
+    const importStatus = $('import-status');
+    const importFormat = $('import-format');
+    const importContent = $('import-content');
 
     // Drawer toggle
     const drawerTab = $('drawer-tab');
@@ -696,6 +951,58 @@
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
       }
+    });
+
+    // Add Case modal
+    function openAddCase() {
+      addCaseModal.classList.add('visible');
+      addCaseModal.setAttribute('aria-hidden', 'false');
+      addCaseStatus.textContent = '';
+      addCaseStatus.className = 'status-line';
+    }
+
+    function closeAddCase() {
+      addCaseModal.classList.remove('visible');
+      addCaseModal.setAttribute('aria-hidden', 'true');
+      addCaseForm.reset();
+      addCaseStatus.textContent = '';
+      addCaseStatus.className = 'status-line';
+    }
+
+    addCaseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openAddCase();
+    });
+    addCaseClose.addEventListener('click', closeAddCase);
+    addCaseCancel.addEventListener('click', closeAddCase);
+    addCaseModal.addEventListener('click', (e) => {
+      if (e.target === addCaseModal) closeAddCase();
+    });
+
+    // Import modal
+    function openImport() {
+      importModal.classList.add('visible');
+      importModal.setAttribute('aria-hidden', 'false');
+      importStatus.textContent = '';
+      importStatus.className = 'status-line';
+    }
+
+    function closeImport() {
+      importModal.classList.remove('visible');
+      importModal.setAttribute('aria-hidden', 'true');
+      importForm.reset();
+      importStatus.textContent = '';
+      importStatus.className = 'status-line';
+    }
+
+    importBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openImport();
+    });
+    importClose.addEventListener('click', closeImport);
+    importCancel.addEventListener('click', closeImport);
+    importModal.addEventListener('click', (e) => {
+      if (e.target === importModal) closeImport();
     });
 
     // Simple markdown parser
@@ -1146,6 +1453,51 @@
     $('evaluate-btn').addEventListener('click', () => runEvaluation(false));
     $('refresh-btn').addEventListener('click', () => runEvaluation(true));
 
+    // Versions modal
+    const versionsModal = $('versions-modal');
+    const versionsList = $('versions-list');
+    const versionsSubtitle = $('versions-subtitle');
+
+    function openVersionsModal() {
+      if (!selectedPatient) return;
+
+      const patientEvals = evaluations.filter(e => e.patientId === selectedPatient.id);
+      versionsSubtitle.textContent = `${patientEvals.length} version(s) for ${selectedPatient.primaryDiagnosis}`;
+
+      if (patientEvals.length === 0) {
+        versionsList.innerHTML = '<div class="empty-note">No evaluations yet. Click "Evaluate Case" to create one.</div>';
+      } else {
+        versionsList.innerHTML = patientEvals.map((ev, i) => `
+          <div class="finding" style="margin-bottom:8px;">
+            <div class="title">Version ${i + 1}</div>
+            <div class="meta">
+              <span class="tag">${new Date(ev.timestamp).toLocaleString()}</span>
+              ${ev.cached ? '<span class="tag" style="background:#1e3a5f;color:#60a5fa;">Cached</span>' : '<span class="tag" style="background:#14532d;color:#86efac;">Fresh</span>'}
+              <span class="tag">${ev.structured?.findings?.length || 0} findings</span>
+            </div>
+            <div style="font-size:11px;color:#666;margin-top:4px;">
+              Specialists: ${ev.specialists?.filter(s => s.status === 'success').length || 0}/${ev.specialists?.length || 0} complete
+            </div>
+          </div>
+        `).join('');
+      }
+
+      versionsModal.classList.add('visible');
+      versionsModal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeVersionsModal() {
+      versionsModal.classList.remove('visible');
+      versionsModal.setAttribute('aria-hidden', 'true');
+    }
+
+    $('versions-btn').addEventListener('click', openVersionsModal);
+    $('versions-close').addEventListener('click', closeVersionsModal);
+    $('versions-close-btn').addEventListener('click', closeVersionsModal);
+    versionsModal.addEventListener('click', (e) => {
+      if (e.target === versionsModal) closeVersionsModal();
+    });
+
     $('export-btn').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(evaluations, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -1154,6 +1506,103 @@
       a.download = `active-meta-mgt-eval-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
+    });
+
+    addCaseForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      addCaseStatus.textContent = 'Saving...';
+      addCaseStatus.className = 'status-line';
+
+      const formData = new FormData(addCaseForm);
+      const payload = {
+        patient_id: (formData.get('patientId') || '').toString().trim() || `P${Date.now()}`,
+        age: Number(formData.get('age')) || 0,
+        gender: (formData.get('gender') || 'U').toString(),
+        primary_diagnosis: (formData.get('primaryDiagnosis') || 'Unknown').toString(),
+        condition_category: (formData.get('category') || 'other').toString(),
+        admission_type: (formData.get('admissionType') || 'UNKNOWN').toString(),
+        severity_score: Math.min(10, Math.max(1, Number(formData.get('severity')) || 5)),
+        critical_flag: formData.get('critical') === 'on',
+        vitals: {},
+        labs: {},
+        medications: [],
+        allergies: [],
+      };
+
+      try {
+        const res = await fetch(`${API}/api/ingest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          addCaseStatus.textContent = data.error || 'Failed to add case (check ingest auth on server).';
+          addCaseStatus.className = 'status-line error-text';
+          return;
+        }
+
+        addCaseStatus.textContent = 'Saved. Refreshing list...';
+        addCaseStatus.className = 'status-line success-text';
+
+        await init();
+        closeAddCase();
+        const maybe = patients.find(p => p.id === payload.patient_id);
+        if (maybe) selectCase(maybe.id);
+      } catch (err) {
+        addCaseStatus.textContent = err.message || 'Unexpected error';
+        addCaseStatus.className = 'status-line error-text';
+      }
+    });
+
+    importForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const content = importContent.value.trim();
+      if (!content) {
+        importStatus.textContent = 'Document content is required.';
+        importStatus.className = 'status-line error-text';
+        return;
+      }
+
+      importStatus.textContent = 'Importing...';
+      importStatus.className = 'status-line';
+
+      const payload = {
+        content,
+        format: importFormat.value === 'auto' ? undefined : importFormat.value,
+      };
+
+      try {
+        const res = await fetch(`${API}/api/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          importStatus.textContent = data.error || 'Import failed (check server logs or ingest auth).';
+          importStatus.className = 'status-line error-text';
+          return;
+        }
+
+        const creds = (data.cases || []).map((c) => `${c.patientId}: ${c.username} / ${c.password}`).join(' • ');
+        importStatus.textContent = `Imported ${data.ingested} case(s). ${creds ? 'Credentials — ' + creds : ''}`;
+        importStatus.className = 'status-line success-text';
+
+        await init();
+        if (data.cases && data.cases.length > 0) {
+          const firstId = data.cases[0].patientId;
+          const maybe = patients.find((p) => p.id === firstId);
+          if (maybe) selectCase(maybe.id);
+        }
+      } catch (err) {
+        importStatus.textContent = err.message || 'Unexpected error';
+        importStatus.className = 'status-line error-text';
+      }
     });
 
     init();
