@@ -47,6 +47,7 @@
       transition: transform 0.3s;
     }
     .drawer-tab.open .arrow { transform: rotate(180deg); }
+    .drawer-tab.open { opacity: 0; pointer-events: none; }
     .demo-badge { background: #f6c343; color: #000; font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 700; letter-spacing: 0.05em; }
 
     /* Drawer panel */
@@ -495,6 +496,48 @@
     .modal-actions { padding: 14px 16px 16px; display: flex; justify-content: flex-end; gap: 10px; }
     .status-line { display: flex; align-items: center; justify-content: space-between; min-height: 20px; margin-top: 4px; }
 
+    .credentials-display { display: none; }
+    .credentials-display.visible { display: block; }
+    .credentials-box {
+      background: #1a2332;
+      border: 1px solid #2d4a6f;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .credentials-box h4 {
+      font-size: 11px;
+      color: #f6c343;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+    .credentials-box .cred-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: #0d1117;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-family: monospace;
+    }
+    .credentials-box .cred-row:last-child { margin-bottom: 0; }
+    .credentials-box .cred-label { color: #666; font-size: 11px; text-transform: uppercase; }
+    .credentials-box .cred-value { color: #e5e5e5; font-size: 13px; user-select: all; }
+    .credentials-warning {
+      background: #2a1a0a;
+      border: 1px solid #78350f;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 11px;
+      color: #fcd34d;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .credentials-warning::before { content: "⚠"; }
+
     .actions { display: flex; gap: 10px; margin-top: 16px; }
 
     .empty { color: #666; text-align: center; padding: 60px; }
@@ -660,6 +703,27 @@
       <button type="submit">Save Case</button>
     </div>
   </form>
+  <div class="credentials-display" id="add-case-credentials">
+    <div class="modal-body">
+      <div class="credentials-box">
+        <h4>Record Credentials</h4>
+        <div class="cred-row">
+          <span class="cred-label">Username</span>
+          <span class="cred-value" id="cred-username"></span>
+        </div>
+        <div class="cred-row">
+          <span class="cred-label">Password</span>
+          <span class="cred-value" id="cred-password"></span>
+        </div>
+      </div>
+      <div class="credentials-warning">
+        Save these credentials now. They will not be shown again.
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="add-case-done">Done</button>
+    </div>
+  </div>
 </div>
 </div>
 
@@ -693,6 +757,41 @@
         <div class="modal-actions">
           <button type="button" class="secondary" id="import-cancel">Cancel</button>
           <button type="submit">Import</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Case Login Modal -->
+  <div class="modal-backdrop" id="case-login-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="case-login-title">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="case-login-title">Case Authentication</div>
+          <div class="modal-subtitle" id="case-login-subtitle">Enter credentials to access this case</div>
+        </div>
+        <button class="drawer-close" id="case-login-close" aria-label="Close login dialog">&times;</button>
+      </div>
+      <form id="case-login-form">
+        <div class="modal-body">
+          <div class="field">
+            <label for="case-login-username">Username</label>
+            <input id="case-login-username" name="username" type="text" placeholder="case-p12345" required />
+          </div>
+          <div class="field">
+            <label for="case-login-password">Password</label>
+            <input id="case-login-password" name="password" type="password" required />
+          </div>
+          <div class="helper-text" id="case-login-helper">Enter your case credentials to view patient details.</div>
+          <div class="status-line" id="case-login-status"></div>
+          <div id="case-login-generate" style="display:none;margin-top:12px;padding:12px;background:#1a2332;border:1px solid #2d4a6f;border-radius:6px;">
+            <p style="font-size:12px;color:#888;margin-bottom:8px;">Don't have credentials? Generate new ones:</p>
+            <button type="button" class="add-case-btn" id="generate-creds-btn" style="width:100%;">Generate Credentials</button>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="case-login-cancel">Cancel</button>
+          <button type="submit">Authenticate</button>
         </div>
       </form>
     </div>
@@ -894,6 +993,10 @@
     const addCaseClose = $('add-case-close');
     const addCaseCancel = $('add-case-cancel');
     const addCaseStatus = $('add-case-status');
+    const addCaseCredentials = $('add-case-credentials');
+    const addCaseDone = $('add-case-done');
+    const credUsername = $('cred-username');
+    const credPassword = $('cred-password');
     const importModal = $('import-modal');
     const importForm = $('import-form');
     const importBtn = $('import-btn');
@@ -902,6 +1005,119 @@
     const importStatus = $('import-status');
     const importFormat = $('import-format');
     const importContent = $('import-content');
+    const caseLoginModal = $('case-login-modal');
+    const caseLoginForm = $('case-login-form');
+    const caseLoginClose = $('case-login-close');
+    const caseLoginCancel = $('case-login-cancel');
+    const caseLoginStatus = $('case-login-status');
+    const caseLoginUsername = $('case-login-username');
+    const caseLoginPassword = $('case-login-password');
+    const caseLoginGenerate = $('case-login-generate');
+    const caseLoginHelper = $('case-login-helper');
+    const generateCredsBtn = $('generate-creds-btn');
+
+    // Case credential storage (sessionStorage)
+    function storeCaseCredentials(patientId, username, password) {
+      const creds = JSON.parse(sessionStorage.getItem('caseCredentials') || '{}');
+      creds[patientId] = { username, password };
+      sessionStorage.setItem('caseCredentials', JSON.stringify(creds));
+    }
+
+    function getCaseCredentials(patientId) {
+      const creds = JSON.parse(sessionStorage.getItem('caseCredentials') || '{}');
+      return creds[patientId] || null;
+    }
+
+    function clearCaseCredentials(patientId) {
+      const creds = JSON.parse(sessionStorage.getItem('caseCredentials') || '{}');
+      delete creds[patientId];
+      sessionStorage.setItem('caseCredentials', JSON.stringify(creds));
+    }
+
+    // Pending case selection (waiting for login)
+    let pendingCaseId = null;
+
+    // Case login modal
+    function openCaseLogin(patientId, showGenerateOption = false) {
+      pendingCaseId = patientId;
+      caseLoginModal.classList.add('visible');
+      caseLoginModal.setAttribute('aria-hidden', 'false');
+      caseLoginStatus.textContent = '';
+      caseLoginStatus.className = 'status-line';
+      caseLoginGenerate.style.display = showGenerateOption ? 'block' : 'none';
+      caseLoginHelper.style.display = 'block';  // Always show helper initially
+      caseLoginForm.reset();
+      caseLoginUsername.focus();
+    }
+
+    function closeCaseLogin() {
+      caseLoginModal.classList.remove('visible');
+      caseLoginModal.setAttribute('aria-hidden', 'true');
+      caseLoginGenerate.style.display = 'none';
+      caseLoginHelper.style.display = 'block';
+      pendingCaseId = null;
+    }
+
+    caseLoginClose.addEventListener('click', closeCaseLogin);
+    caseLoginCancel.addEventListener('click', closeCaseLogin);
+    caseLoginModal.addEventListener('click', (e) => {
+      if (e.target === caseLoginModal) closeCaseLogin();
+    });
+
+    // Generate credentials for cases without them
+    generateCredsBtn.addEventListener('click', async () => {
+      if (!pendingCaseId) return;
+
+      generateCredsBtn.disabled = true;
+      generateCredsBtn.textContent = 'Generating...';
+
+      try {
+        const res = await fetch(`${API}/api/cases/${pendingCaseId}/credentials`, {
+          method: 'POST',
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          // If credentials already exist, hide the generate box and show username hint
+          if (res.status === 409 && data.message) {
+            caseLoginGenerate.style.display = 'none';
+            caseLoginStatus.innerHTML = `<span style="color:#fcd34d;">Credentials already exist. ${data.message}</span>`;
+            caseLoginStatus.className = 'status-line';
+          } else {
+            caseLoginStatus.textContent = data.error || 'Failed to generate credentials';
+            caseLoginStatus.className = 'status-line error-text';
+          }
+          return;
+        }
+
+        // Show generated credentials
+        caseLoginStatus.innerHTML = `
+          <div style="background:#1a2332;border:1px solid #2d4a6f;padding:10px;border-radius:6px;margin-top:8px;">
+            <div style="color:#f6c343;font-size:11px;text-transform:uppercase;margin-bottom:8px;">Generated Credentials</div>
+            <div style="font-family:monospace;font-size:13px;">
+              <div>Username: <strong>${data.credentials.username}</strong></div>
+              <div>Password: <strong>${data.credentials.password}</strong></div>
+            </div>
+            <div style="color:#fcd34d;font-size:11px;margin-top:8px;">Save these now - they won't be shown again!</div>
+          </div>
+        `;
+        caseLoginStatus.className = 'status-line';
+        caseLoginGenerate.style.display = 'none';
+
+        // Pre-fill the form
+        caseLoginUsername.value = data.credentials.username;
+        caseLoginPassword.value = data.credentials.password;
+
+        // Store credentials
+        storeCaseCredentials(pendingCaseId, data.credentials.username, data.credentials.password);
+      } catch (err) {
+        caseLoginStatus.textContent = err.message || 'Network error';
+        caseLoginStatus.className = 'status-line error-text';
+      } finally {
+        generateCredsBtn.disabled = false;
+        generateCredsBtn.textContent = 'Generate Credentials';
+      }
+    });
 
     // Drawer toggle
     const drawerTab = $('drawer-tab');
@@ -954,7 +1170,22 @@
     });
 
     // Add Case modal
+    function showCredentials(username, password) {
+      credUsername.textContent = username;
+      credPassword.textContent = password;
+      addCaseForm.style.display = 'none';
+      addCaseCredentials.classList.add('visible');
+    }
+
+    function resetCredentialsView() {
+      addCaseForm.style.display = '';
+      addCaseCredentials.classList.remove('visible');
+      credUsername.textContent = '';
+      credPassword.textContent = '';
+    }
+
     function openAddCase() {
+      resetCredentialsView();
       addCaseModal.classList.add('visible');
       addCaseModal.setAttribute('aria-hidden', 'false');
       addCaseStatus.textContent = '';
@@ -967,6 +1198,7 @@
       addCaseForm.reset();
       addCaseStatus.textContent = '';
       addCaseStatus.className = 'status-line';
+      resetCredentialsView();
     }
 
     addCaseBtn.addEventListener('click', (e) => {
@@ -975,6 +1207,7 @@
     });
     addCaseClose.addEventListener('click', closeAddCase);
     addCaseCancel.addEventListener('click', closeAddCase);
+    addCaseDone.addEventListener('click', closeAddCase);
     addCaseModal.addEventListener('click', (e) => {
       if (e.target === addCaseModal) closeAddCase();
     });
@@ -1199,19 +1432,50 @@
       }
     }
 
-    async function selectCase(id) {
+    async function selectCase(id, credentials = null) {
       selectedPatient = patients.find(p => p.id === id);
       if (!selectedPatient) return;
 
       // Close the drawer
       toggleDrawer(false);
 
+      // Get credentials (passed in or from storage)
+      const creds = credentials || getCaseCredentials(id);
+
+      // If no credentials, prompt for login with generate option
+      if (!creds) {
+        openCaseLogin(id, true);  // Show generate option for cases without stored credentials
+        return;
+      }
+
+      // Fetch full patient data with authentication
+      const headers = {
+        'X-Case-Username': creds.username,
+        'X-Case-Password': creds.password,
+      };
+
+      const res = await fetch(`${API}/api/patients/${id}`, { headers });
+
+      if (res.status === 401 || res.status === 403) {
+        // Invalid or wrong credentials - clear and prompt for login
+        clearCaseCredentials(id);
+        const data = await res.json().catch(() => ({}));
+        openCaseLogin(id, true);  // Show generate option since credentials failed
+        caseLoginStatus.textContent = data.message || 'Invalid credentials. Please try again.';
+        caseLoginStatus.className = 'status-line error-text';
+        return;
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Failed to load patient data');
+        return;
+      }
+
+      fullPatientData = await res.json();
+
       emptyState.style.display = 'none';
       caseDetail.classList.add('visible');
-
-      // Fetch full patient data
-      const res = await fetch(`${API}/api/patients/${id}`);
-      fullPatientData = await res.json();
       renderPatientDetails(fullPatientData);
 
       // Reset specialist cards
@@ -1224,6 +1488,31 @@
 
       renderCaseList();
     }
+
+    // Case login form submission
+    caseLoginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!pendingCaseId) return;
+
+      const username = caseLoginUsername.value.trim();
+      const password = caseLoginPassword.value;
+
+      if (!username || !password) {
+        caseLoginStatus.textContent = 'Username and password are required.';
+        caseLoginStatus.className = 'status-line error-text';
+        return;
+      }
+
+      caseLoginStatus.textContent = 'Authenticating...';
+      caseLoginStatus.className = 'status-line';
+
+      // Store credentials and try to select the case
+      storeCaseCredentials(pendingCaseId, username, password);
+      const caseId = pendingCaseId;
+      closeCaseLogin();
+
+      await selectCase(caseId, { username, password });
+    });
 
     function renderPatientDetails(p) {
       // Header
@@ -1530,7 +1819,7 @@
       };
 
       try {
-        const res = await fetch(`${API}/api/ingest`, {
+        const res = await fetch(`${API}/api/cases`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -1539,17 +1828,23 @@
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          addCaseStatus.textContent = data.error || 'Failed to add case (check ingest auth on server).';
+          addCaseStatus.textContent = data.error || 'Failed to add case.';
           addCaseStatus.className = 'status-line error-text';
           return;
         }
 
-        addCaseStatus.textContent = 'Saved. Refreshing list...';
+        addCaseStatus.textContent = 'Saved successfully!';
         addCaseStatus.className = 'status-line success-text';
 
+        // Display server-returned credentials
+        if (data.credentials) {
+          showCredentials(data.credentials.username, data.credentials.password);
+          // Store credentials for this case so user can access it
+          storeCaseCredentials(data.patientId, data.credentials.username, data.credentials.password);
+        }
+
         await init();
-        closeAddCase();
-        const maybe = patients.find(p => p.id === payload.patient_id);
+        const maybe = patients.find(p => p.id === data.patientId);
         if (maybe) selectCase(maybe.id);
       } catch (err) {
         addCaseStatus.textContent = err.message || 'Unexpected error';

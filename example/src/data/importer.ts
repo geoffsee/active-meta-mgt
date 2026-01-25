@@ -82,7 +82,7 @@ function secureRandomString(length = 12) {
   return output.slice(0, length);
 }
 
-function generateCredentials(patientId?: string) {
+export function generateCredentials(patientId?: string) {
   const base = (patientId || "case").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const username = `case-${base || "new"}`;
   const password = secureRandomString(12);

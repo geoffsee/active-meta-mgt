@@ -32,7 +32,7 @@ import { icdToScenario, getMappedIcdCodes } from "./data/reference/icdMapping";
 import { drugConstraints } from "./data/reference/drugRules";
 import type { Patient } from "./data/loaders/patients";
 import OpenAI from "openai";
-import { parseAndAlignCases } from "./data/importer";
+import { parseAndAlignCases, generateCredentials } from "./data/importer";
 import { Buffer } from "node:buffer";
 
 // Repository abstraction
@@ -465,6 +465,54 @@ app.get("/api/patients", async (c) => {
 app.get("/api/patients/:id", async (c) => {
   const repo = c.get("repo");
   const id = c.req.param("id");
+
+  // Check for case credentials (Basic Auth or custom headers)
+  const authHeader = c.req.header("authorization");
+  const customUsername = c.req.header("x-case-username");
+  const customPassword = c.req.header("x-case-password");
+
+  let username: string | undefined;
+  let password: string | undefined;
+
+  if (authHeader?.startsWith("Basic ")) {
+    try {
+      const decoded = atob(authHeader.slice(6));
+      const [u, p] = decoded.split(":");
+      username = u;
+      password = p;
+    } catch {
+      // Invalid base64
+    }
+  } else if (customUsername && customPassword) {
+    username = customUsername;
+    password = customPassword;
+  }
+
+  // Verify credentials grant access to this specific patient
+  if (!username || !password) {
+    return c.json(
+      { error: "Authentication required", message: "Provide case credentials to access patient details" },
+      401,
+      { "WWW-Authenticate": 'Basic realm="case"' }
+    );
+  }
+
+  const storedCred = await repo.credentials.get(username);
+  if (!storedCred || storedCred.password !== password) {
+    return c.json(
+      { error: "Invalid credentials", message: "Username or password is incorrect" },
+      401
+    );
+  }
+
+  // Ensure credentials are for THIS patient only
+  if (storedCred.patientId !== id) {
+    return c.json(
+      { error: "Access denied", message: "These credentials do not grant access to this patient" },
+      403
+    );
+  }
+
   const patient = await repo.patients.getById(id);
   if (!patient) {
     return c.json({ error: `Patient ${id} not found` }, 404);
@@ -906,6 +954,108 @@ app.post("/api/import", async (c) => {
   } catch (err) {
     return c.json({ error: (err as Error).message }, 400);
   }
+});
+
+// Create case with auto-generated credentials (for demo UI)
+app.post("/api/cases", async (c) => {
+  const repo = c.get("repo");
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  // Ensure patient_id exists
+  const patientId = body.patient_id || `P${Date.now()}`;
+  const patientData = { ...body, patient_id: patientId };
+
+  try {
+    // Generate credentials for this case
+    const creds = generateCredentials(patientId);
+
+    // Store the patient record
+    const record = await repo.ingest.append({
+      ...patientData,
+      _source: "cases-api",
+    });
+
+    // Store the credentials
+    await repo.credentials.set(creds.username, {
+      password: creds.password,
+      patientId: patientId,
+    });
+
+    // Invalidate patient cache
+    repo.patients.invalidateCache();
+
+    return c.json({
+      success: true,
+      patientId,
+      credentials: {
+        username: creds.username,
+        password: creds.password,
+      },
+      record,
+    });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+});
+
+// Debug: List all stored credentials (for development only)
+app.get("/api/credentials", async (c) => {
+  const repo = c.get("repo");
+  const creds = await repo.credentials.loadAll();
+  const entries: { username: string; patientId: string }[] = [];
+  creds.forEach((val, key) => {
+    entries.push({ username: key, patientId: val.patientId });
+  });
+  return c.json({ count: entries.length, credentials: entries });
+});
+
+// Generate credentials for an existing case (if none exist)
+app.post("/api/cases/:id/credentials", async (c) => {
+  const repo = c.get("repo");
+  const patientId = c.req.param("id");
+
+  // Check if patient exists
+  const patient = await repo.patients.getById(patientId);
+  if (!patient) {
+    return c.json({ error: `Patient ${patientId} not found` }, 404);
+  }
+
+  // Check if credentials already exist for this patient
+  const allCreds = await repo.credentials.loadAll();
+  let existingUsername: string | null = null;
+  allCreds.forEach((cred, username) => {
+    if (cred.patientId === patientId) {
+      existingUsername = username;
+    }
+  });
+
+  if (existingUsername) {
+    return c.json({
+      error: "Credentials already exist for this patient",
+      message: `Use username: ${existingUsername}`,
+    }, 409);
+  }
+
+  // Generate new credentials
+  const creds = generateCredentials(patientId);
+  await repo.credentials.set(creds.username, {
+    password: creds.password,
+    patientId: patientId,
+  });
+
+  return c.json({
+    success: true,
+    patientId,
+    credentials: {
+      username: creds.username,
+      password: creds.password,
+    },
+  });
 });
 
 app.get("/api/ingest/log", async (c) => {
