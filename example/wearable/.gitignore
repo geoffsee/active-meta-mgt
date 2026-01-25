@@ -1,7 +1,7 @@
 # Xcode user-specific data
 xcuserdata/
 *.xcuserstate
-
+/test-results
 # Build artifacts
 DerivedData/
 build/
