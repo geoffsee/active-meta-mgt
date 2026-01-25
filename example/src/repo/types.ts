@@ -201,6 +201,9 @@ export interface ICredentialsRepo {
 
   /** Check if credentials exist for a username */
   has(username: string): Promise<boolean>;
+
+  /** Check if a patient has assigned credentials */
+  hasCredentialsForPatient(patientId: string): Promise<boolean>;
 }
 
 /**

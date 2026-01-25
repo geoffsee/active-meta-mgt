@@ -497,20 +497,35 @@ app.get("/api/patients/:id", async (c) => {
     );
   }
 
-  const storedCred = await repo.credentials.get(username);
-  if (!storedCred || storedCred.password !== password) {
-    return c.json(
-      { error: "Invalid credentials", message: "Username or password is incorrect" },
-      401
-    );
-  }
+  // Allow demo/demo for demo records (records without specific credentials)
+  const isDemoLogin = username === "demo" && password === "demo";
 
-  // Ensure credentials are for THIS patient only
-  if (storedCred.patientId !== id) {
-    return c.json(
-      { error: "Access denied", message: "These credentials do not grant access to this patient" },
-      403
-    );
+  if (isDemoLogin) {
+    // Check if this patient has specific credentials - if so, require them
+    const hasSpecificCreds = await repo.credentials.hasCredentialsForPatient(id);
+    if (hasSpecificCreds) {
+      return c.json(
+        { error: "Access denied", message: "This record has specific credentials assigned. Use those instead of demo/demo." },
+        403
+      );
+    }
+    // demo/demo allowed for records without specific credentials
+  } else {
+    const storedCred = await repo.credentials.get(username);
+    if (!storedCred || storedCred.password !== password) {
+      return c.json(
+        { error: "Invalid credentials", message: "Username or password is incorrect" },
+        401
+      );
+    }
+
+    // Ensure credentials are for THIS patient only
+    if (storedCred.patientId !== id) {
+      return c.json(
+        { error: "Access denied", message: "These credentials do not grant access to this patient" },
+        403
+      );
+    }
   }
 
   const patient = await repo.patients.getById(id);

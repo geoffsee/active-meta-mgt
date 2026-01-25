@@ -531,6 +531,14 @@ export class CloudflareCredentialsRepo implements ICredentialsRepo {
     const creds = await this.ensureLoaded();
     return creds.has(username);
   }
+
+  async hasCredentialsForPatient(patientId: string): Promise<boolean> {
+    const creds = await this.ensureLoaded();
+    for (const cred of creds.values()) {
+      if (cred.patientId === patientId) return true;
+    }
+    return false;
+  }
 }
 
 // =============================================================================

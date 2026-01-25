@@ -495,6 +495,14 @@ export class BunCredentialsRepo implements ICredentialsRepo {
     await this.ensureLoaded();
     return this.credentials.has(username);
   }
+
+  async hasCredentialsForPatient(patientId: string): Promise<boolean> {
+    await this.ensureLoaded();
+    for (const cred of this.credentials.values()) {
+      if (cred.patientId === patientId) return true;
+    }
+    return false;
+  }
 }
 
 // =============================================================================
