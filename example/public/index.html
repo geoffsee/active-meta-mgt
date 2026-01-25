@@ -784,10 +784,6 @@
           </div>
           <div class="helper-text" id="case-login-helper">Enter your case credentials to view patient details.</div>
           <div class="status-line" id="case-login-status"></div>
-          <div id="case-login-generate" style="display:none;margin-top:12px;padding:12px;background:#1a2332;border:1px solid #2d4a6f;border-radius:6px;">
-            <p style="font-size:12px;color:#888;margin-bottom:8px;">Don't have credentials? Generate new ones:</p>
-            <button type="button" class="add-case-btn" id="generate-creds-btn" style="width:100%;">Generate Credentials</button>
-          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="secondary" id="case-login-cancel">Cancel</button>
@@ -1012,9 +1008,7 @@
     const caseLoginStatus = $('case-login-status');
     const caseLoginUsername = $('case-login-username');
     const caseLoginPassword = $('case-login-password');
-    const caseLoginGenerate = $('case-login-generate');
     const caseLoginHelper = $('case-login-helper');
-    const generateCredsBtn = $('generate-creds-btn');
 
     // Case credential storage (sessionStorage)
     function storeCaseCredentials(patientId, username, password) {
@@ -1038,14 +1032,13 @@
     let pendingCaseId = null;
 
     // Case login modal
-    function openCaseLogin(patientId, showGenerateOption = false) {
+    function openCaseLogin(patientId) {
       pendingCaseId = patientId;
       caseLoginModal.classList.add('visible');
       caseLoginModal.setAttribute('aria-hidden', 'false');
       caseLoginStatus.textContent = '';
       caseLoginStatus.className = 'status-line';
-      caseLoginGenerate.style.display = showGenerateOption ? 'block' : 'none';
-      caseLoginHelper.style.display = 'block';  // Always show helper initially
+      caseLoginHelper.style.display = 'block';
       caseLoginForm.reset();
       caseLoginUsername.focus();
     }
@@ -1053,7 +1046,6 @@
     function closeCaseLogin() {
       caseLoginModal.classList.remove('visible');
       caseLoginModal.setAttribute('aria-hidden', 'true');
-      caseLoginGenerate.style.display = 'none';
       caseLoginHelper.style.display = 'block';
       pendingCaseId = null;
     }
@@ -1062,61 +1054,6 @@
     caseLoginCancel.addEventListener('click', closeCaseLogin);
     caseLoginModal.addEventListener('click', (e) => {
       if (e.target === caseLoginModal) closeCaseLogin();
-    });
-
-    // Generate credentials for cases without them
-    generateCredsBtn.addEventListener('click', async () => {
-      if (!pendingCaseId) return;
-
-      generateCredsBtn.disabled = true;
-      generateCredsBtn.textContent = 'Generating...';
-
-      try {
-        const res = await fetch(`${API}/api/cases/${pendingCaseId}/credentials`, {
-          method: 'POST',
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-          // If credentials already exist, hide the generate box and show username hint
-          if (res.status === 409 && data.message) {
-            caseLoginGenerate.style.display = 'none';
-            caseLoginStatus.innerHTML = `<span style="color:#fcd34d;">Credentials already exist. ${data.message}</span>`;
-            caseLoginStatus.className = 'status-line';
-          } else {
-            caseLoginStatus.textContent = data.error || 'Failed to generate credentials';
-            caseLoginStatus.className = 'status-line error-text';
-          }
-          return;
-        }
-
-        // Show generated credentials
-        caseLoginStatus.innerHTML = `
-          <div style="background:#1a2332;border:1px solid #2d4a6f;padding:10px;border-radius:6px;margin-top:8px;">
-            <div style="color:#f6c343;font-size:11px;text-transform:uppercase;margin-bottom:8px;">Generated Credentials</div>
-            <div style="font-family:monospace;font-size:13px;">
-              <div>Username: <strong>${data.credentials.username}</strong></div>
-              <div>Password: <strong>${data.credentials.password}</strong></div>
-            </div>
-            <div style="color:#fcd34d;font-size:11px;margin-top:8px;">Save these now - they won't be shown again!</div>
-          </div>
-        `;
-        caseLoginStatus.className = 'status-line';
-        caseLoginGenerate.style.display = 'none';
-
-        // Pre-fill the form
-        caseLoginUsername.value = data.credentials.username;
-        caseLoginPassword.value = data.credentials.password;
-
-        // Store credentials
-        storeCaseCredentials(pendingCaseId, data.credentials.username, data.credentials.password);
-      } catch (err) {
-        caseLoginStatus.textContent = err.message || 'Network error';
-        caseLoginStatus.className = 'status-line error-text';
-      } finally {
-        generateCredsBtn.disabled = false;
-        generateCredsBtn.textContent = 'Generate Credentials';
-      }
     });
 
     // Drawer toggle
@@ -1442,9 +1379,9 @@
       // Get credentials (passed in or from storage)
       const creds = credentials || getCaseCredentials(id);
 
-      // If no credentials, prompt for login with generate option
+      // If no credentials, prompt for login
       if (!creds) {
-        openCaseLogin(id, true);  // Show generate option for cases without stored credentials
+        openCaseLogin(id);
         return;
       }
 
@@ -1460,7 +1397,7 @@
         // Invalid or wrong credentials - clear and prompt for login
         clearCaseCredentials(id);
         const data = await res.json().catch(() => ({}));
-        openCaseLogin(id, true);  // Show generate option since credentials failed
+        openCaseLogin(id);
         caseLoginStatus.textContent = data.message || 'Invalid credentials. Please try again.';
         caseLoginStatus.className = 'status-line error-text';
         return;

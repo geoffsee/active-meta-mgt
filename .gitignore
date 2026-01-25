@@ -48,3 +48,4 @@ evaluations.jsonl
 # Wrangler (Cloudflare Workers)
 .wrangler/
 /example/.dev.vars
+example/.playwright-mcp/
