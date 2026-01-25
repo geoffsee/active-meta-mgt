@@ -73,7 +73,11 @@ function secureRandomString(length = 12) {
   }
   let output = "";
   for (let i = 0; i < bytes.length && output.length < length; i++) {
-    output += alphabet[bytes[i] % alphabet.length];
+    const byte = bytes[i];
+    if (byte === undefined) {
+      continue;
+    }
+    output += alphabet.charAt(byte % alphabet.length);
   }
   return output.slice(0, length);
 }

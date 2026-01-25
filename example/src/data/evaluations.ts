@@ -84,9 +84,10 @@ export function getLatestEvaluation(patientId: string): EvaluationRecord | null 
   if (evals.length === 0) return null;
 
   // Sort by timestamp descending, return most recent
-  return evals.sort((a, b) =>
+  const latest = evals.sort((a, b) =>
     new Date(b._ts).getTime() - new Date(a._ts).getTime()
   )[0];
+  return latest ?? null;
 }
 
 /**

@@ -9,13 +9,18 @@ async function run() {
     console.error(`Failed to fetch /scenarios: ${scenariosRes.status}`);
     process.exit(1);
   }
-  const scenarios = (await scenariosRes.json()) as { id: string; title: string }[];
+  const scenarios = (await scenariosRes.json()) as Array<{ id: string; title: string }>;
   if (!scenarios.length) {
     console.error("No scenarios available");
     process.exit(1);
   }
 
-  const chosen = scenarioId ?? scenarios[0].id;
+  const firstScenario = scenarios[0];
+  if (!firstScenario) {
+    console.error("Scenario list empty");
+    process.exit(1);
+  }
+  const chosen = scenarioId ?? firstScenario.id;
   console.log(`Using scenario: ${chosen}`);
 
   const ctxRes = await fetch(`${base}/scenarios/${chosen}/context`);
@@ -23,14 +28,14 @@ async function run() {
     console.error(`Failed to fetch context: ${ctxRes.status}`);
     process.exit(1);
   }
-  const contextPayload = await ctxRes.json();
+  const contextPayload = (await ctxRes.json()) as { workingMemory?: { text?: string } };
   console.log("Working memory:\n", contextPayload.workingMemory?.text ?? "<none>");
 
   // Optional: exercise the /llm endpoint if the server has OPENAI_API_KEY
   try {
     const llmRes = await fetch(`${base}/scenarios/${chosen}/llm`, { method: "POST" });
     if (llmRes.ok) {
-      const llmPayload = await llmRes.json();
+      const llmPayload = (await llmRes.json()) as { response?: string };
       console.log("Model reply:\n", llmPayload.response ?? llmPayload);
     } else {
       console.warn(`/llm returned status ${llmRes.status}; skipping display`);

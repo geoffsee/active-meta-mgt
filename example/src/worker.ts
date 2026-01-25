@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker entry point for active-meta-mgt example.
  *
- * Replaces Bun.serve() with Hono router and KV storage.
+ * Uses the shared repository abstraction for portable persistence.
  */
 
 /// <reference types="@cloudflare/workers-types" />
@@ -9,6 +9,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { makeDefaultActiveMetaContext } from "active-meta-mgt";
 import { SPECIALISTS, type Specialist } from "./specialists";
 import {
@@ -34,14 +35,16 @@ import OpenAI from "openai";
 import { parseAndAlignCases } from "./data/importer";
 import { Buffer } from "node:buffer";
 
-// Polyfill Buffer for the Workers runtime (used by third-party libs)
-// Cloudflare Workers doesn’t expose Buffer globally.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
+// Repository abstraction
+import {
+  createRepoContext,
+  type IRepoContext,
+  DEFAULT_PATIENT_COOLDOWN_MS,
+} from "./repo";
+
+// Polyfill Buffer for the Workers runtime
 if (typeof globalThis.Buffer === "undefined") {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  globalThis.Buffer = Buffer;
+  (globalThis as any).Buffer = Buffer;
 }
 
 // --------------------------------------------------------------------------
@@ -58,7 +61,7 @@ interface Env {
 type Bindings = Env;
 
 type Variables = {
-  openai: OpenAI;
+  repo: IRepoContext;
 };
 
 // --------------------------------------------------------------------------
@@ -71,192 +74,21 @@ const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 app.use("*", cors());
 app.use("*", logger());
 
+// Initialize repository context for each request
+app.use("*", async (c, next) => {
+  const repo = createRepoContext({
+    runtime: "cloudflare",
+    kv: c.env.PATIENTS_KV,
+  });
+  c.set("repo", repo);
+  await next();
+});
+
 // --------------------------------------------------------------------------
-// KV-based Patient Storage
+// Authentication Helpers
 // --------------------------------------------------------------------------
 
-const INGEST_LOG_KEY = "ingest:log";
-const PATIENTS_INDEX_KEY = "patients:index";
-const PATIENTS_CACHE_KEY = "patients:all"; // Denormalized cache of all patients
-const EVAL_CACHE_PREFIX = "eval:"; // Prefix for evaluation cache keys
-const EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
-const EVAL_COOLDOWN_PREFIX = "cooldown:"; // Prefix for rate limit cooldown keys
-const PATIENT_EVAL_COOLDOWN_SECONDS = 4 * 60 * 60; // 4 hours cooldown per patient
-const EVAL_LOG_KEY = "evaluations:log"; // Permanent evaluation audit log
-const MAX_EVAL_LOG_ENTRIES = 10000; // Maximum evaluation records to keep
-
-async function checkPatientCooldown(
-  kv: Env["PATIENTS_KV"],
-  patientId: string
-): Promise<{ allowed: boolean; remainingSeconds: number }> {
-  const key = `${EVAL_COOLDOWN_PREFIX}${patientId}`;
-  const record = await kv.get<{ timestamp: number }>(key, "json");
-
-  if (!record) {
-    return { allowed: true, remainingSeconds: 0 };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const elapsed = now - record.timestamp;
-
-  if (elapsed >= PATIENT_EVAL_COOLDOWN_SECONDS) {
-    return { allowed: true, remainingSeconds: 0 };
-  }
-
-  return {
-    allowed: false,
-    remainingSeconds: PATIENT_EVAL_COOLDOWN_SECONDS - elapsed,
-  };
-}
-
-async function recordPatientEvaluation(
-  kv: Env["PATIENTS_KV"],
-  patientId: string
-): Promise<void> {
-  const key = `${EVAL_COOLDOWN_PREFIX}${patientId}`;
-  await kv.put(
-    key,
-    JSON.stringify({ timestamp: Math.floor(Date.now() / 1000) }),
-    { expirationTtl: PATIENT_EVAL_COOLDOWN_SECONDS }
-  );
-}
-
-// =============================================================================
-// Medical-Grade Authentication (HIPAA Compliant)
-// API Key + HMAC-SHA256 signature verification with replay protection
-// =============================================================================
-
-const AUTH_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes
-const AUDIT_LOG_KEY = "audit:log";
-const MAX_AUDIT_ENTRIES = 10000;
-
-interface AuditLogEntry {
-  timestamp: string;
-  action: "ingest_auth_success" | "ingest_auth_failure";
-  apiKeyPrefix: string;
-  ip: string;
-  userAgent: string;
-  path: string;
-  method: string;
-  reason?: string;
-  recordCount?: number;
-}
-
-async function logAudit(kv: Env["PATIENTS_KV"], entry: AuditLogEntry): Promise<void> {
-  try {
-    const existing = await kv.get<AuditLogEntry[]>(AUDIT_LOG_KEY, "json");
-    const log = existing || [];
-    log.push(entry);
-    // Rotate to prevent storage bloat
-    const trimmed = log.length > MAX_AUDIT_ENTRIES ? log.slice(-MAX_AUDIT_ENTRIES) : log;
-    await kv.put(AUDIT_LOG_KEY, JSON.stringify(trimmed));
-  } catch {
-    // Don't fail the request if audit logging fails
-    console.error("[AUDIT ERROR]", entry);
-  }
-}
-
-// =============================================================================
-// Evaluation Persistence (Permanent Audit Trail)
-// =============================================================================
-
-interface EvaluationRecord {
-  _id: string;
-  _ts: string;
-  patientId: string;
-  patient: {
-    summary: string;
-    diagnosis: string;
-    category: string;
-    severity: number;
-    critical: boolean;
-  };
-  scenario: {
-    id: string;
-    title: string;
-  };
-  structured: {
-    runs: unknown[];
-    findings: unknown[];
-    conflicts: unknown[];
-    followUps: unknown[];
-  };
-  timestamp: string;
-}
-
-async function appendEvaluation(
-  kv: Env["PATIENTS_KV"],
-  data: Omit<EvaluationRecord, "_id" | "_ts">
-): Promise<EvaluationRecord> {
-  const record: EvaluationRecord = {
-    _id: `eval-${data.patientId}-${Date.now().toString(36)}`,
-    _ts: new Date().toISOString(),
-    ...data,
-  };
-
-  try {
-    const existing = await kv.get<EvaluationRecord[]>(EVAL_LOG_KEY, "json");
-    const log = existing || [];
-    log.push(record);
-    // Rotate to prevent storage bloat
-    const trimmed = log.length > MAX_EVAL_LOG_ENTRIES ? log.slice(-MAX_EVAL_LOG_ENTRIES) : log;
-    await kv.put(EVAL_LOG_KEY, JSON.stringify(trimmed));
-  } catch (err) {
-    console.error("[EVAL LOG ERROR]", err);
-  }
-
-  return record;
-}
-
-async function getEvaluationLog(kv: Env["PATIENTS_KV"]): Promise<EvaluationRecord[]> {
-  try {
-    const log = await kv.get<EvaluationRecord[]>(EVAL_LOG_KEY, "json");
-    return log || [];
-  } catch {
-    return [];
-  }
-}
-
-async function getPatientEvaluations(
-  kv: Env["PATIENTS_KV"],
-  patientId: string
-): Promise<EvaluationRecord[]> {
-  const log = await getEvaluationLog(kv);
-  return log.filter((e) => e.patientId === patientId);
-}
-
-async function getLatestEvaluation(
-  kv: Env["PATIENTS_KV"],
-  patientId: string
-): Promise<EvaluationRecord | null> {
-  const evals = await getPatientEvaluations(kv, patientId);
-  if (evals.length === 0) return null;
-  return evals.sort((a, b) =>
-    new Date(b._ts).getTime() - new Date(a._ts).getTime()
-  )[0];
-}
-
-async function getEvaluationStats(kv: Env["PATIENTS_KV"]): Promise<{
-  total: number;
-  byPatient: Record<string, number>;
-  recent24h: number;
-}> {
-  const evals = await getEvaluationLog(kv);
-  const now = Date.now();
-  const day = 24 * 60 * 60 * 1000;
-
-  const byPatient: Record<string, number> = {};
-  let recent24h = 0;
-
-  for (const e of evals) {
-    byPatient[e.patientId] = (byPatient[e.patientId] || 0) + 1;
-    if (now - new Date(e._ts).getTime() < day) {
-      recent24h++;
-    }
-  }
-
-  return { total: evals.length, byPatient, recent24h };
-}
+const AUTH_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
 
 function getClientIP(req: Request): string {
   return (
@@ -266,7 +98,6 @@ function getClientIP(req: Request): string {
   );
 }
 
-// Timing-safe comparison for Workers (no crypto.timingSafeEqual)
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let result = 0;
@@ -299,13 +130,43 @@ interface AuthResult {
   authenticated: boolean;
   error?: string;
   statusCode?: number;
+  patientId?: string;
 }
 
 async function verifyIngestAuth(
   env: Env,
+  repo: IRepoContext,
   req: Request,
   body: string
 ): Promise<AuthResult> {
+  // Try case-based authentication first (Basic Auth)
+  const authHeader = req.headers.get("Authorization");
+  if (authHeader?.startsWith("Basic ")) {
+    const base64 = authHeader.slice(6);
+    const decoded = Buffer.from(base64, "base64").toString("utf-8");
+    const [username, password] = decoded.split(":");
+
+    if (username) {
+      const cred = await repo.credentials.get(username);
+      if (cred && timingSafeEqual(password || "", cred.password)) {
+        return { authenticated: true, patientId: cred.patientId };
+      }
+      return { authenticated: false, error: "Invalid credentials", statusCode: 401 };
+    }
+  }
+
+  // Try custom headers (X-Case-Username, X-Case-Password)
+  const caseUsername = req.headers.get("X-Case-Username");
+  const casePassword = req.headers.get("X-Case-Password");
+  if (caseUsername && casePassword) {
+    const cred = await repo.credentials.get(caseUsername);
+    if (cred && timingSafeEqual(casePassword, cred.password)) {
+      return { authenticated: true, patientId: cred.patientId };
+    }
+    return { authenticated: false, error: "Invalid credentials", statusCode: 401 };
+  }
+
+  // Fall back to HMAC authentication
   if (!env.INGEST_API_KEY || !env.INGEST_API_SECRET) {
     return {
       authenticated: false,
@@ -327,20 +188,12 @@ async function verifyIngestAuth(
   }
 
   if (!timingSafeEqual(apiKey, env.INGEST_API_KEY)) {
-    return {
-      authenticated: false,
-      error: "Invalid API key",
-      statusCode: 401,
-    };
+    return { authenticated: false, error: "Invalid API key", statusCode: 401 };
   }
 
   const requestTime = parseInt(timestamp, 10);
   if (isNaN(requestTime)) {
-    return {
-      authenticated: false,
-      error: "Invalid timestamp format",
-      statusCode: 401,
-    };
+    return { authenticated: false, error: "Invalid timestamp format", statusCode: 401 };
   }
 
   const now = Date.now();
@@ -357,344 +210,21 @@ async function verifyIngestAuth(
   const expectedSignature = await computeHmacSha256(env.INGEST_API_SECRET, signaturePayload);
 
   if (!timingSafeEqual(signature, expectedSignature)) {
-    return {
-      authenticated: false,
-      error: "Invalid signature",
-      statusCode: 401,
-    };
+    return { authenticated: false, error: "Invalid signature", statusCode: 401 };
   }
 
   return { authenticated: true };
 }
 
-// In-memory cache for the worker instance (survives across requests in same isolate)
-let patientsCache: { data: Patient[]; ts: number } | null = null;
-let statsCache: { data: ReturnType<typeof getDatasetStats>; ts: number } | null = null;
-const CACHE_TTL_MS = 30_000; // 30 seconds
-
-interface IngestRecord {
-  _ts: string;
-  _type: "patient" | "vitals" | "labs" | "meds" | "note" | "unknown";
-  _id: string;
-  [key: string]: unknown;
-}
-
-async function appendToKV(
-  kv: Env["PATIENTS_KV"],
-  data: Record<string, unknown>
-): Promise<IngestRecord> {
-  const record: IngestRecord = {
-    _ts: new Date().toISOString(),
-    _type: inferType(data),
-    _id: inferId(data),
-    ...data,
-  };
-
-  // Get existing log
-  const existing = await kv.get<IngestRecord[]>(INGEST_LOG_KEY, "json");
-  const log = existing || [];
-  log.push(record);
-
-  // Store updated log
-  await kv.put(INGEST_LOG_KEY, JSON.stringify(log));
-
-  // Update patient index
-  if (record._type === "patient") {
-    const patient = toPatient(record);
-    await kv.put(`patient:${patient.patient_id}`, JSON.stringify(patient));
-
-    // Update index
-    const index = (await kv.get<string[]>(PATIENTS_INDEX_KEY, "json")) || [];
-    if (!index.includes(patient.patient_id)) {
-      index.push(patient.patient_id);
-      await kv.put(PATIENTS_INDEX_KEY, JSON.stringify(index));
-    }
-
-    // Invalidate caches
-    patientsCache = null;
-    statsCache = null;
-    kv.delete(PATIENTS_CACHE_KEY).catch(() => {});
-  }
-
-  return record;
-}
-
-async function readLogFromKV(kv: Env["PATIENTS_KV"]): Promise<IngestRecord[]> {
-  return (await kv.get<IngestRecord[]>(INGEST_LOG_KEY, "json")) || [];
-}
-
-async function loadPatientsFromKV(kv: Env["PATIENTS_KV"]): Promise<Patient[]> {
-  // Check in-memory cache first
-  if (patientsCache && Date.now() - patientsCache.ts < CACHE_TTL_MS) {
-    return patientsCache.data;
-  }
-
-  // Try denormalized cache in KV (single read for all patients)
-  const cached = await kv.get<Patient[]>(PATIENTS_CACHE_KEY, "json");
-  if (cached) {
-    patientsCache = { data: cached, ts: Date.now() };
-    return cached;
-  }
-
-  // Fallback: parallel reads from individual keys
-  const index = (await kv.get<string[]>(PATIENTS_INDEX_KEY, "json")) || [];
-  if (index.length === 0) return [];
-
-  // Parallel fetch all patients at once
-  const results = await Promise.all(
-    index.map((id) => kv.get<Patient>(`patient:${id}`, "json"))
-  );
-  const patients = results.filter((p): p is Patient => p !== null);
-
-  // Update caches
-  patientsCache = { data: patients, ts: Date.now() };
-  // Store denormalized cache for future requests (fire and forget)
-  kv.put(PATIENTS_CACHE_KEY, JSON.stringify(patients)).catch(() => {});
-
-  return patients;
-}
-
-async function getPatientFromKV(
-  kv: Env["PATIENTS_KV"],
-  id: string
-): Promise<Patient | null> {
-  return await kv.get<Patient>(`patient:${id}`, "json");
-}
-
 // --------------------------------------------------------------------------
-// Data transformation helpers (from ingest.ts)
+// Scenario Generation
 // --------------------------------------------------------------------------
 
-function inferType(data: Record<string, unknown>): IngestRecord["_type"] {
-  const hasId =
-    data.patient_id || data.id || data.mrn || data.patientId || data.subject_id;
-  const hasClinical =
-    data.diagnosis ||
-    data.primary_diagnosis ||
-    data.dx ||
-    data.chief_complaint ||
-    data.age;
-  if (hasId && hasClinical) return "patient";
-  if (data.note || data.text || data.narrative) return "note";
-  if (data.medications || data.meds) return "meds";
-  const onlyVitals =
-    (data.vitals || data.spo2 || data.heart_rate || data.bp) && !hasClinical;
-  if (onlyVitals) return "vitals";
-  const onlyLabs =
-    (data.labs || data.hemoglobin || data.wbc || data.creatinine) &&
-    !hasClinical;
-  if (onlyLabs) return "labs";
-  if (hasId) return "patient";
-  return "unknown";
-}
-
-function inferId(data: Record<string, unknown>): string {
-  return str(
-    data.patient_id ||
-      data.id ||
-      data.mrn ||
-      data.patientId ||
-      data.subject_id ||
-      data.encounter_id ||
-      `auto-${Date.now()}`
-  );
-}
-
-function str(val: unknown): string {
-  if (val === null || val === undefined) return "";
-  return String(val);
-}
-
-function num(val: unknown): number | null {
-  if (val === null || val === undefined || val === "") return null;
-  const n = Number(val);
-  return isNaN(n) ? null : n;
-}
-
-function toBool(val: unknown): boolean {
-  if (typeof val === "boolean") return val;
-  if (typeof val === "string")
-    return val.toLowerCase() === "true" || val === "1";
-  if (typeof val === "number") return val !== 0;
-  return false;
-}
-
-function toArray(val: unknown): string[] {
-  if (!val) return [];
-  if (Array.isArray(val)) return val.map(String);
-  if (typeof val === "string") {
-    if (val.includes("|")) return val.split("|").filter(Boolean);
-    if (val.includes(","))
-      return val
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    return [val];
-  }
-  return [];
-}
-
-function ageToBucket(age: number | null): string {
-  if (!age) return "unknown";
-  if (age < 18) return "0-17";
-  if (age <= 30) return "18-30";
-  if (age <= 45) return "31-45";
-  if (age <= 60) return "46-60";
-  if (age <= 75) return "61-75";
-  return "76+";
-}
-
-function normalizeGender(val: unknown): "M" | "F" | "U" {
-  const s = str(val).toUpperCase();
-  if (s === "M" || s === "MALE" || s === "1") return "M";
-  if (s === "F" || s === "FEMALE" || s === "0" || s === "2") return "F";
-  return "U";
-}
-
-function inferCategory(data: Record<string, unknown>): string {
-  const dx = str(data.primary_diagnosis || data.diagnosis || "").toLowerCase();
-  if (
-    dx.includes("sepsis") ||
-    dx.includes("pneumonia") ||
-    dx.includes("infection")
-  )
-    return "infectious";
-  if (
-    dx.includes("heart") ||
-    dx.includes("cardiac") ||
-    dx.includes("mi") ||
-    dx.includes("chf")
-  )
-    return "cardiac";
-  if (
-    dx.includes("respiratory") ||
-    dx.includes("copd") ||
-    dx.includes("asthma")
-  )
-    return "respiratory";
-  if (dx.includes("diabetes") || dx.includes("metabolic")) return "metabolic";
-  if (dx.includes("liver") || dx.includes("gi") || dx.includes("bowel"))
-    return "gi";
-  if (dx.includes("stroke") || dx.includes("neuro")) return "neuro";
-  if (
-    dx.includes("trauma") ||
-    dx.includes("fracture") ||
-    dx.includes("injury")
-  )
-    return "trauma";
-  if (
-    dx.includes("cancer") ||
-    dx.includes("malignant") ||
-    dx.includes("tumor")
-  )
-    return "oncology";
-  return "other";
-}
-
-function extractVitals(data: Record<string, unknown>): Patient["vitals"] {
-  const v = (data.vitals as Record<string, unknown>) || data;
-  return {
-    spo2: num(v.spo2 || v.o2sat || v.oxygen_saturation),
-    heart_rate: num(v.heart_rate || v.hr || v.pulse),
-    systolic_bp: num(
-      v.systolic_bp || v.sbp || v.systolic || parseBpSystolic(v.bp)
-    ),
-    diastolic_bp: num(
-      v.diastolic_bp || v.dbp || v.diastolic || parseBpDiastolic(v.bp)
-    ),
-    oxygen_flow: num(v.oxygen_flow || v.o2_flow || v.fio2),
-    temperature: num(v.temperature || v.temp),
-    respiratory_rate: num(v.respiratory_rate || v.rr || v.resp_rate),
-    respiratory_status: str(v.respiratory_status || v.resp_status) || "unknown",
-  };
-}
-
-function extractLabs(data: Record<string, unknown>): Patient["labs"] {
-  const l = (data.labs as Record<string, unknown>) || data;
-  return {
-    hemoglobin: num(l.hemoglobin || l.hgb || l.hb),
-    wbc: num(l.wbc || l.white_blood_cells),
-    rbc: num(l.rbc || l.red_blood_cells),
-    platelets: num(l.platelets || l.plt),
-    hematocrit: num(l.hematocrit || l.hct),
-    mcv: num(l.mcv),
-    mch: num(l.mch),
-    mchc: num(l.mchc),
-    rdw: num(l.rdw),
-    neutrophils: num(l.neutrophils || l.neut),
-    lymphocytes: num(l.lymphocytes || l.lymph),
-    monocytes: num(l.monocytes || l.mono),
-    eosinophils: num(l.eosinophils || l.eos),
-    basophils: num(l.basophils || l.baso),
-    creatinine: num(l.creatinine || l.cr),
-    bun: num(l.bun),
-    glucose: num(l.glucose || l.glu || l.bg),
-    sodium: num(l.sodium || l.na),
-    potassium: num(l.potassium || l.k),
-    lactate: num(l.lactate || l.lac),
-  };
-}
-
-function parseBpSystolic(bp: unknown): number | null {
-  const s = str(bp);
-  const match = s.match(/(\d+)\s*\/\s*\d+/);
-  return match ? num(match[1]) : null;
-}
-
-function parseBpDiastolic(bp: unknown): number | null {
-  const s = str(bp);
-  const match = s.match(/\d+\s*\/\s*(\d+)/);
-  return match ? num(match[1]) : null;
-}
-
-function toPatient(data: Record<string, unknown>): Patient {
-  return {
-    patient_id: str(
-      data.patient_id ||
-        data.id ||
-        data.mrn ||
-        data.patientId ||
-        `P${Date.now()}`
-    ),
-    age: num(data.age) || 0,
-    age_bucket: str(data.age_bucket) || ageToBucket(num(data.age)),
-    gender: normalizeGender(data.gender || data.sex),
-    blood_type: str(data.blood_type || data.bloodType) || "Unknown",
-    primary_diagnosis:
-      str(
-        data.primary_diagnosis ||
-          data.diagnosis ||
-          data.dx ||
-          data.chief_complaint
-      ) || "Unknown",
-    icd9_code: str(data.icd9_code || data.icd9 || data.icd || data.code) || "",
-    secondary_diagnoses: toArray(
-      data.secondary_diagnoses || data.diagnoses || data.comorbidities
-    ),
-    condition_category:
-      str(data.condition_category || data.category) || inferCategory(data),
-    insurance: str(data.insurance || data.payer) || "Unknown",
-    admission_type: str(data.admission_type || data.admit_type) || "UNKNOWN",
-    vitals: extractVitals(data),
-    labs: extractLabs(data),
-    medications: toArray(data.medications || data.meds || data.drugs),
-    allergies: toArray(data.allergies),
-    severity_score:
-      num(data.severity_score || data.severity || data.acuity) || 5,
-    critical_flag: toBool(data.critical_flag || data.critical || data.icu),
-  };
-}
-
-// --------------------------------------------------------------------------
-// Scenario generation (simplified - works with KV patients)
-// --------------------------------------------------------------------------
-
-function generateScenarioFromPatient(patient: Patient, config?: any) {
+function generateScenarioFromPatient(patient: Patient) {
   const id = `generated-${patient.patient_id}`;
   const title = `${patient.primary_diagnosis} - ${patient.age}${patient.gender}`;
   const description = `Automated scenario for patient ${patient.patient_id}`;
 
-  // Generate knowledge objects from patient data
   const goals = [
     {
       id: `${id}-goal-1`,
@@ -721,9 +251,8 @@ function generateScenarioFromPatient(patient: Patient, config?: any) {
   ];
 
   const evidence: any[] = [];
-
-  // Add vitals as evidence
   const v = patient.vitals;
+
   if (v.spo2 != null) {
     evidence.push({
       id: `${id}-ev-spo2`,
@@ -752,7 +281,6 @@ function generateScenarioFromPatient(patient: Patient, config?: any) {
     });
   }
 
-  // Add critical labs as evidence
   const l = patient.labs;
   if (l.lactate != null) {
     evidence.push({
@@ -820,57 +348,8 @@ function getPatientSummary(p: Patient) {
   };
 }
 
-function getDatasetStats(patients: Patient[]) {
-  // Return cached stats if available and patients haven't changed
-  if (statsCache && Date.now() - statsCache.ts < CACHE_TTL_MS) {
-    return statsCache.data;
-  }
-
-  const byCategory: Record<string, number> = {};
-  const bySeverity: Record<string, number> = {};
-  let critical = 0;
-
-  for (const p of patients) {
-    byCategory[p.condition_category] =
-      (byCategory[p.condition_category] || 0) + 1;
-    const sevKey =
-      p.severity_score <= 3 ? "low" : p.severity_score <= 6 ? "medium" : "high";
-    bySeverity[sevKey] = (bySeverity[sevKey] || 0) + 1;
-    if (p.critical_flag) critical++;
-  }
-
-  const stats = {
-    total: patients.length,
-    byCategory,
-    bySeverity,
-    critical,
-  };
-
-  statsCache = { data: stats, ts: Date.now() };
-  return stats;
-}
-
-function filterPatients(
-  patients: Patient[],
-  criteria: {
-    category?: string;
-    critical?: boolean;
-    minSeverity?: number;
-    maxSeverity?: number;
-  }
-): Patient[] {
-  // Single-pass filter for all criteria
-  return patients.filter((p) => {
-    if (criteria.category && p.condition_category !== criteria.category) return false;
-    if (criteria.critical !== undefined && p.critical_flag !== criteria.critical) return false;
-    if (criteria.minSeverity !== undefined && p.severity_score < criteria.minSeverity) return false;
-    if (criteria.maxSeverity !== undefined && p.severity_score > criteria.maxSeverity) return false;
-    return true;
-  });
-}
-
 // --------------------------------------------------------------------------
-// OpenAI client helper
+// OpenAI Helper
 // --------------------------------------------------------------------------
 
 function makeOpenAI(apiKey: string): OpenAI {
@@ -883,7 +362,8 @@ function makeOpenAI(apiKey: string): OpenAI {
 
 // Health check
 app.get("/api/health", async (c) => {
-  const patients = await loadPatientsFromKV(c.env.PATIENTS_KV);
+  const repo = c.get("repo");
+  const patients = await repo.patients.loadAll();
   return c.json({
     status: "ok",
     timestamp: new Date().toISOString(),
@@ -955,6 +435,7 @@ app.post("/scenarios/:id/llm", async (c) => {
 
 // Patients
 app.get("/api/patients", async (c) => {
+  const repo = c.get("repo");
   const url = new URL(c.req.url);
   const category = url.searchParams.get("category") || undefined;
   const critical = url.searchParams.get("critical");
@@ -962,8 +443,8 @@ app.get("/api/patients", async (c) => {
   const maxSeverity = url.searchParams.get("maxSeverity");
   const limit = url.searchParams.get("limit");
 
-  const allPatients = await loadPatientsFromKV(c.env.PATIENTS_KV);
-  const patients = filterPatients(allPatients, {
+  const allPatients = await repo.patients.loadAll();
+  const patients = await repo.patients.filter({
     category,
     critical: critical ? critical === "true" : undefined,
     minSeverity: minSeverity ? parseInt(minSeverity) : undefined,
@@ -972,17 +453,19 @@ app.get("/api/patients", async (c) => {
 
   const limitNum = limit ? parseInt(limit) : 50;
   const summaries = patients.slice(0, limitNum).map(getPatientSummary);
+  const stats = await repo.patients.getStats();
 
   return c.json({
     patients: summaries,
     total: patients.length,
-    stats: getDatasetStats(allPatients),
+    stats,
   });
 });
 
 app.get("/api/patients/:id", async (c) => {
+  const repo = c.get("repo");
   const id = c.req.param("id");
-  const patient = await getPatientFromKV(c.env.PATIENTS_KV, id);
+  const patient = await repo.patients.getById(id);
   if (!patient) {
     return c.json({ error: `Patient ${id} not found` }, 404);
   }
@@ -1004,8 +487,9 @@ app.get("/api/specialists", (c) => {
 
 // Scenario generation
 app.get("/api/scenarios/generate/:patientId", async (c) => {
+  const repo = c.get("repo");
   const patientId = c.req.param("patientId");
-  const patient = await getPatientFromKV(c.env.PATIENTS_KV, patientId);
+  const patient = await repo.patients.getById(patientId);
   if (!patient) {
     return c.json({ error: `Patient ${patientId} not found` }, 404);
   }
@@ -1014,8 +498,9 @@ app.get("/api/scenarios/generate/:patientId", async (c) => {
 });
 
 app.get("/api/scenarios/generate/:patientId/context", async (c) => {
+  const repo = c.get("repo");
   const patientId = c.req.param("patientId");
-  const patient = await getPatientFromKV(c.env.PATIENTS_KV, patientId);
+  const patient = await repo.patients.getById(patientId);
   if (!patient) {
     return c.json({ error: `Patient ${patientId} not found` }, 404);
   }
@@ -1024,7 +509,7 @@ app.get("/api/scenarios/generate/:patientId/context", async (c) => {
   const ctx = makeDefaultActiveMetaContext(`generated-${patientId}`);
 
   scenario.goals.forEach((g) => ctx.upsertGoal(g));
-  scenario.constraints.forEach((c) => ctx.upsertConstraint(c));
+  scenario.constraints.forEach((con) => ctx.upsertConstraint(con));
   scenario.assumptions.forEach((a) => ctx.upsertAssumption(a));
   scenario.evidence.forEach((e) => ctx.upsertEvidence(e));
   scenario.questions.forEach((q) => ctx.upsertQuestion(q));
@@ -1053,25 +538,27 @@ app.get("/api/scenarios/generate/:patientId/context", async (c) => {
 
 // Multi-specialist evaluation
 app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
+  const repo = c.get("repo");
   const patientId = c.req.param("patientId");
-  const patient = await getPatientFromKV(c.env.PATIENTS_KV, patientId);
+  const patient = await repo.patients.getById(patientId);
   if (!patient) {
     return c.json({ error: `Patient ${patientId} not found` }, 404);
   }
 
   // Check per-patient rate limit (cooldown)
-  const cooldown = await checkPatientCooldown(c.env.PATIENTS_KV, patientId);
+  const cooldown = await repo.cooldown.check(patientId, DEFAULT_PATIENT_COOLDOWN_MS);
   if (!cooldown.allowed) {
+    const remainingSeconds = Math.ceil(cooldown.remainingMs / 1000);
     return c.json(
       {
         error: "Rate limited",
-        message: `Patient ${patientId} was recently evaluated. Please wait ${cooldown.remainingSeconds} seconds before re-evaluating.`,
-        retryAfter: cooldown.remainingSeconds,
+        message: `Patient ${patientId} was recently evaluated. Please wait ${remainingSeconds} seconds before re-evaluating.`,
+        retryAfter: remainingSeconds,
         patientId,
       },
       {
         status: 429,
-        headers: { "Retry-After": String(cooldown.remainingSeconds) },
+        headers: { "Retry-After": String(remainingSeconds) },
       }
     );
   }
@@ -1086,21 +573,16 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
     // No body or invalid JSON
   }
 
-  // Check URL param for refresh
   const url = new URL(c.req.url);
   if (url.searchParams.get("refresh") === "true") {
     forceRefresh = true;
   }
 
-  // Generate cache key based on patient and specialists
-  const specialistIds = (requestedSpecialists || SPECIALISTS.map((s) => s.id)).sort().join(",");
-  const cacheKey = `${EVAL_CACHE_PREFIX}${patientId}:${specialistIds}`;
-
-  // Check cache unless forced refresh
+  // Check cached evaluation unless forced refresh
   if (!forceRefresh) {
-    const cached = await c.env.PATIENTS_KV.get(cacheKey, "json");
+    const cached = await repo.evaluations.getCached(patientId, DEFAULT_PATIENT_COOLDOWN_MS);
     if (cached) {
-      return c.json({ ...cached as object, cached: true });
+      return c.json({ ...cached, cached: true });
     }
   }
 
@@ -1141,12 +623,12 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
       ctx.upsertGoal({ ...g, tags });
     });
 
-    scenario.constraints.forEach((c) => {
-      const tags = [...c.tags];
+    scenario.constraints.forEach((con) => {
+      const tags = [...con.tags];
       if (specialist.id === "medications") {
         tags.push({ key: "lane", value: "medications" });
       }
-      ctx.upsertConstraint({ ...c, tags });
+      ctx.upsertConstraint({ ...con, tags });
     });
 
     scenario.assumptions.forEach((a) => ctx.upsertAssumption(a));
@@ -1280,14 +762,11 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
     timestamp: new Date().toISOString(),
   };
 
-  // Record evaluation for rate limiting and cache the result (fire and forget)
-  recordPatientEvaluation(c.env.PATIENTS_KV, patientId).catch(() => {});
-  c.env.PATIENTS_KV.put(cacheKey, JSON.stringify(response), {
-    expirationTtl: EVAL_CACHE_TTL_SECONDS,
-  }).catch(() => {});
+  // Record evaluation for rate limiting (fire and forget)
+  repo.cooldown.record(patientId, DEFAULT_PATIENT_COOLDOWN_MS).catch(() => {});
 
-  // Persist evaluation to permanent audit log (fire and forget)
-  appendEvaluation(c.env.PATIENTS_KV, response).catch((err) => {
+  // Persist evaluation to audit log (fire and forget)
+  repo.evaluations.append(response).catch((err) => {
     console.error("Failed to persist evaluation:", err);
   });
 
@@ -1296,11 +775,11 @@ app.post("/api/scenarios/generate/:patientId/evaluate", async (c) => {
 
 // Ingest (protected with HIPAA-compliant authentication)
 app.post("/api/ingest", async (c) => {
+  const repo = c.get("repo");
   const clientIP = getClientIP(c.req.raw);
   const userAgent = c.req.header("user-agent") || "unknown";
   const apiKeyPrefix = (c.req.header("X-API-Key") || "").slice(0, 8) || "none";
 
-  // Read body for signature verification
   let bodyText: string;
   try {
     bodyText = await c.req.text();
@@ -1308,10 +787,9 @@ app.post("/api/ingest", async (c) => {
     return c.json({ error: "Failed to read request body" }, 400);
   }
 
-  // Verify authentication
-  const authResult = await verifyIngestAuth(c.env, c.req.raw, bodyText);
+  const authResult = await verifyIngestAuth(c.env, repo, c.req.raw, bodyText);
   if (!authResult.authenticated) {
-    logAudit(c.env.PATIENTS_KV, {
+    repo.auditLog.log({
       timestamp: new Date().toISOString(),
       action: "ingest_auth_failure",
       apiKeyPrefix,
@@ -1322,75 +800,51 @@ app.post("/api/ingest", async (c) => {
       reason: authResult.error,
     }).catch(() => {});
 
+    const status = (authResult.statusCode || 401) as ContentfulStatusCode;
     return c.json(
       {
         error: "Authentication failed",
         message: authResult.error,
         documentation: "https://docs.example.com/api/authentication",
       },
-      {
-        status: authResult.statusCode || 401,
-        headers: { "WWW-Authenticate": 'HMAC-SHA256 realm="ingest"' },
-      }
+      status,
+      { "WWW-Authenticate": 'HMAC-SHA256 realm="ingest"' }
     );
   }
 
   try {
     const contentType = c.req.header("content-type") || "";
-    let recordCount = 0;
+    const casePatientId = authResult.patientId;
 
-    if (
-      contentType.includes("application/x-ndjson") ||
-      contentType.includes("text/plain")
-    ) {
+    const enforcePatientId = (item: Record<string, unknown>) => {
+      if (casePatientId) {
+        return { ...item, patient_id: casePatientId };
+      }
+      return item;
+    };
+
+    let records: any[] = [];
+
+    if (contentType.includes("application/x-ndjson") || contentType.includes("text/plain")) {
       const lines = bodyText.split("\n").filter(Boolean);
-      const records = [];
       for (const line of lines) {
-        records.push(await appendToKV(c.env.PATIENTS_KV, JSON.parse(line)));
+        records.push(await repo.ingest.append(enforcePatientId(JSON.parse(line))));
       }
-      recordCount = records.length;
-
-      logAudit(c.env.PATIENTS_KV, {
-        timestamp: new Date().toISOString(),
-        action: "ingest_auth_success",
-        apiKeyPrefix,
-        ip: clientIP,
-        userAgent,
-        path: "/api/ingest",
-        method: "POST",
-        recordCount,
-      }).catch(() => {});
-
-      return c.json({ ingested: records.length, records });
+    } else {
+      const body = JSON.parse(bodyText);
+      if (Array.isArray(body)) {
+        for (const item of body) {
+          records.push(await repo.ingest.append(enforcePatientId(item)));
+        }
+      } else {
+        records.push(await repo.ingest.append(enforcePatientId(body)));
+      }
     }
 
-    const body = JSON.parse(bodyText);
+    // Invalidate patient cache after ingest
+    repo.patients.invalidateCache();
 
-    if (Array.isArray(body)) {
-      const records = [];
-      for (const item of body) {
-        records.push(await appendToKV(c.env.PATIENTS_KV, item));
-      }
-      recordCount = records.length;
-
-      logAudit(c.env.PATIENTS_KV, {
-        timestamp: new Date().toISOString(),
-        action: "ingest_auth_success",
-        apiKeyPrefix,
-        ip: clientIP,
-        userAgent,
-        path: "/api/ingest",
-        method: "POST",
-        recordCount,
-      }).catch(() => {});
-
-      return c.json({ ingested: records.length, records });
-    }
-
-    const record = await appendToKV(c.env.PATIENTS_KV, body);
-    recordCount = 1;
-
-    logAudit(c.env.PATIENTS_KV, {
+    repo.auditLog.log({
       timestamp: new Date().toISOString(),
       action: "ingest_auth_success",
       apiKeyPrefix,
@@ -1398,10 +852,10 @@ app.post("/api/ingest", async (c) => {
       userAgent,
       path: "/api/ingest",
       method: "POST",
-      recordCount,
+      recordCount: records.length,
     }).catch(() => {});
 
-    return c.json({ ingested: 1, record });
+    return c.json({ ingested: records.length, records });
   } catch (err) {
     return c.json({ error: (err as Error).message }, 400);
   }
@@ -1409,6 +863,7 @@ app.post("/api/ingest", async (c) => {
 
 // Import (align + ingest) - no auth, intended for demo UI
 app.post("/api/import", async (c) => {
+  const repo = c.get("repo");
   let body: any;
   try {
     body = await c.req.json();
@@ -1425,11 +880,19 @@ app.post("/api/import", async (c) => {
 
   try {
     const aligned = parseAndAlignCases(content, format);
-    const records = [];
+    const records: any[] = [];
 
     for (const cased of aligned) {
-      records.push(await appendToKV(c.env.PATIENTS_KV, cased.aligned));
+      records.push(await repo.ingest.append(cased.aligned));
+      // Register credentials
+      await repo.credentials.set(cased.credentials.username, {
+        password: cased.credentials.password,
+        patientId: cased.aligned.patient_id as string,
+      });
     }
+
+    // Invalidate patient cache
+    repo.patients.invalidateCache();
 
     return c.json({
       ingested: records.length,
@@ -1446,9 +909,10 @@ app.post("/api/import", async (c) => {
 });
 
 app.get("/api/ingest/log", async (c) => {
+  const repo = c.get("repo");
   const url = new URL(c.req.url);
   const limit = parseInt(url.searchParams.get("limit") || "100");
-  const log = await readLogFromKV(c.env.PATIENTS_KV);
+  const log = await repo.ingest.readLog();
   return c.json({
     total: log.length,
     records: log.slice(-limit),
@@ -1456,7 +920,8 @@ app.get("/api/ingest/log", async (c) => {
 });
 
 app.get("/api/ingest/patients", async (c) => {
-  const patients = await loadPatientsFromKV(c.env.PATIENTS_KV);
+  const repo = c.get("repo");
+  const patients = await repo.patients.loadAll();
   return c.json({
     total: patients.length,
     patients: patients.map((p) => ({
@@ -1473,6 +938,7 @@ app.get("/api/ingest/patients", async (c) => {
 
 // Audit log access (requires API key)
 app.get("/api/ingest/audit", async (c) => {
+  const repo = c.get("repo");
   const apiKey = c.req.header("X-API-Key");
   if (!c.env.INGEST_API_KEY || apiKey !== c.env.INGEST_API_KEY) {
     return c.json(
@@ -1483,18 +949,16 @@ app.get("/api/ingest/audit", async (c) => {
 
   const url = new URL(c.req.url);
   const limit = parseInt(url.searchParams.get("limit") || "100");
-  const action = url.searchParams.get("action") as AuditLogEntry["action"] | null;
+  const action = url.searchParams.get("action") as "ingest_auth_success" | "ingest_auth_failure" | null;
 
-  const log = await c.env.PATIENTS_KV.get<AuditLogEntry[]>(AUDIT_LOG_KEY, "json");
-  let filtered = log || [];
-
-  if (action) {
-    filtered = filtered.filter((e) => e.action === action);
-  }
+  const entries = await repo.auditLog.getEntries({
+    limit,
+    action: action || undefined,
+  });
 
   return c.json({
-    total: filtered.length,
-    entries: filtered.slice(-limit),
+    total: await repo.auditLog.count(),
+    entries,
   });
 });
 
@@ -1566,7 +1030,8 @@ app.get("/api/reference/medications/:name", (c) => {
 });
 
 app.get("/api/scenarios/stats", async (c) => {
-  const patients = await loadPatientsFromKV(c.env.PATIENTS_KV);
+  const repo = c.get("repo");
+  const patients = await repo.patients.loadAll();
   return c.json({
     totalPatients: patients.length,
     categories: Array.from(new Set(patients.map((p) => p.condition_category))),
@@ -1576,17 +1041,19 @@ app.get("/api/scenarios/stats", async (c) => {
 // --- Evaluation history ---
 
 app.get("/api/evaluations", async (c) => {
-  const stats = await getEvaluationStats(c.env.PATIENTS_KV);
+  const repo = c.get("repo");
+  const stats = await repo.evaluations.getStats();
   return c.json(stats);
 });
 
 app.get("/api/evaluations/:patientId", async (c) => {
+  const repo = c.get("repo");
   const patientId = c.req.param("patientId");
   if (!patientId) {
     return c.json({ error: "Patient ID required" }, 400);
   }
 
-  const evals = await getPatientEvaluations(c.env.PATIENTS_KV, patientId);
+  const evals = await repo.evaluations.getByPatient(patientId);
   return c.json({
     patientId,
     evaluations: evals,
@@ -1595,17 +1062,43 @@ app.get("/api/evaluations/:patientId", async (c) => {
 });
 
 app.get("/api/evaluations/:patientId/latest", async (c) => {
+  const repo = c.get("repo");
   const patientId = c.req.param("patientId");
   if (!patientId) {
     return c.json({ error: "Patient ID required" }, 400);
   }
 
-  const latest = await getLatestEvaluation(c.env.PATIENTS_KV, patientId);
+  const latest = await repo.evaluations.getLatest(patientId);
   if (!latest) {
     return c.json({ error: `No evaluations found for patient ${patientId}` }, 404);
   }
 
   return c.json(latest);
+});
+
+// --- Request logs ---
+
+app.get("/api/logs/requests", async (c) => {
+  const repo = c.get("repo");
+  const url = new URL(c.req.url);
+  const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+  const path = url.searchParams.get("path") || undefined;
+  const method = url.searchParams.get("method") || undefined;
+  const minStatus = url.searchParams.get("minStatus")
+    ? parseInt(url.searchParams.get("minStatus")!, 10)
+    : undefined;
+
+  const logs = await repo.requestLog.getEntries({ limit, path, method, minStatus });
+  return c.json({
+    logs,
+    count: logs.length,
+  });
+});
+
+app.get("/api/logs/requests/stats", async (c) => {
+  const repo = c.get("repo");
+  const stats = await repo.requestLog.getStats();
+  return c.json(stats);
 });
 
 // Catch-all for 404

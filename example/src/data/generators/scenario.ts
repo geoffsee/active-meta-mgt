@@ -133,7 +133,14 @@ export function listAvailablePatients(): PatientSummary[] {
  */
 export function getRandomScenario(config?: GeneratorConfig): GeneratedScenario {
   const patients = loadPatients();
-  const randomPatient = patients[Math.floor(Math.random() * patients.length)];
+  if (patients.length === 0) {
+    throw new Error("No patients available for scenario generation");
+  }
+  const randomIndex = Math.floor(Math.random() * patients.length);
+  const randomPatient = patients[randomIndex];
+  if (!randomPatient) {
+    throw new Error("Random patient selection failed");
+  }
   return generateScenarioFromPatient(randomPatient, config);
 }
 

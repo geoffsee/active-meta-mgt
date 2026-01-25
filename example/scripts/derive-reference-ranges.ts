@@ -72,8 +72,11 @@ function percentile(arr: number[], p: number): number {
   const idx = (p / 100) * (sorted.length - 1);
   const lower = Math.floor(idx);
   const upper = Math.ceil(idx);
-  if (lower === upper) return sorted[lower];
-  return sorted[lower] + (sorted[upper] - sorted[lower]) * (idx - lower);
+  const lowerValue = sorted[lower];
+  const upperValue = sorted[upper];
+  if (lowerValue === undefined || upperValue === undefined) return NaN;
+  if (lower === upper) return lowerValue;
+  return lowerValue + (upperValue - lowerValue) * (idx - lower);
 }
 
 function round(value: number, decimals: number = 2): number {
@@ -124,7 +127,11 @@ async function main() {
   const ranges: Record<string, LabRange> = {};
 
   for (const [key, meta] of Object.entries(NHANES_COLUMNS)) {
-    const values = records.map((r) => parseFloat(r[meta.column]));
+    const values = records.map((r) => {
+      const raw = r[meta.column];
+      if (raw === undefined || raw === "") return NaN;
+      return parseFloat(raw);
+    });
     ranges[key] = deriveRange(values, meta);
     console.log(
       `  ${meta.label}: ${ranges[key].low} - ${ranges[key].high} ${meta.unit} (n=${ranges[key].sampleSize})`

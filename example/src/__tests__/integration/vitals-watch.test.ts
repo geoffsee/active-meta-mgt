@@ -13,6 +13,14 @@ import {
   type VitalsPayload,
 } from "./mock-watch-client";
 
+type ApiResponse = {
+  error?: string;
+  message?: string;
+  ingested?: number;
+  record?: Record<string, unknown>;
+  records?: Array<Record<string, unknown>>;
+};
+
 const BASE_URL = process.env.TEST_API_URL || "http://localhost:3333";
 
 // Track created test data for cleanup
@@ -49,7 +57,7 @@ describe("VitalsWatch API Contract Tests", () => {
       const response = await testClient.submitWithAuth(payload, "");
 
       expect(response.status).toBe(401);
-      const data = await response.json();
+      const data = (await response.json()) as ApiResponse;
       // Server returns { error: "Authentication failed", message: "specific reason" }
       expect(data.error).toBe("Authentication failed");
       expect(data.message).toContain("Authentication required");
@@ -65,7 +73,7 @@ describe("VitalsWatch API Contract Tests", () => {
       const response = await badClient.submitWithAuth(payload);
 
       expect(response.status).toBe(401);
-      const data = await response.json();
+      const data = (await response.json()) as ApiResponse;
       // Server returns { error: "Authentication failed", message: "Invalid password" }
       expect(data.error).toBe("Authentication failed");
       expect(data.message).toContain("Invalid password");
@@ -81,7 +89,7 @@ describe("VitalsWatch API Contract Tests", () => {
       const response = await badClient.submitWithAuth(payload);
 
       expect(response.status).toBe(401);
-      const data = await response.json();
+      const data = (await response.json()) as ApiResponse;
       // Server returns { error: "Authentication failed", message: "Unknown case username" }
       expect(data.error).toBe("Authentication failed");
       expect(data.message).toContain("Unknown case username");
@@ -95,7 +103,7 @@ describe("VitalsWatch API Contract Tests", () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as ApiResponse;
       expect(data.ingested).toBe(1);
     });
   });
@@ -187,11 +195,11 @@ describe("VitalsWatch API Contract Tests", () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as ApiResponse;
 
       // The record should have the authenticated patient_id, not the one in payload
       const record = data.record || data.records?.[0];
-      expect(record.patient_id).toBe(TEST_PATIENT_ID);
+      expect(record?.patient_id).toBe(TEST_PATIENT_ID);
     });
   });
 
@@ -218,7 +226,7 @@ describe("VitalsWatch API Contract Tests", () => {
 
       // 3. Verify the vitals appear in the log
       const logResponse = await fetch(`${BASE_URL}/api/ingest/log?limit=50`);
-      const logData = await logResponse.json();
+      const logData = (await logResponse.json()) as { records: Array<Record<string, unknown>> };
 
       // Find our submitted record
       const submitted = logData.records.find(
@@ -227,6 +235,9 @@ describe("VitalsWatch API Contract Tests", () => {
       );
 
       expect(submitted).toBeDefined();
+      if (!submitted) {
+        throw new Error("Submitted record not found in log");
+      }
       expect(submitted._type).toBe("vitals");
     });
   });
@@ -303,12 +314,12 @@ describe("VitalsWatch API Contract Tests", () => {
       const response = await testClient.submitRaw(records);
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as ApiResponse;
       expect(data.ingested).toBe(3);
-      expect(data.records.length).toBe(3);
+      expect(data.records?.length).toBe(3);
 
       // All records should have the authenticated patient_id
-      for (const record of data.records) {
+      for (const record of data.records || []) {
         expect(record.patient_id).toBe(TEST_PATIENT_ID);
       }
     });

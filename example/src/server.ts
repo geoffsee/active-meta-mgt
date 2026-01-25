@@ -25,6 +25,7 @@ import {
   generateScenarioFromPatient,
   listAvailablePatients,
   getScenarioStats,
+  type GeneratorConfig,
 } from "./data/generators/scenario";
 import { getPatientSummary, transformPatient } from "./data/transformers/patient";
 import { labRanges, getLabNames } from "./data/reference/labRanges";
@@ -129,6 +130,9 @@ function verifyCaseAuth(req: Request): { authenticated: boolean; patientId?: str
     const base64 = authHeader.slice(6);
     const decoded = Buffer.from(base64, "base64").toString("utf-8");
     const [username, password] = decoded.split(":");
+    if (!username) {
+      return { authenticated: false, error: "Invalid basic auth header" };
+    }
 
     const cred = caseCredentials.get(username);
     if (!cred) {
@@ -629,8 +633,8 @@ Bun.serve({
     "/api/scenarios/generate": {
       POST: async (req) => {
         try {
-          const body = await req.json();
-          const patientId = body.patientId as string;
+          const body = (await req.json()) as { patientId?: string; config?: GeneratorConfig };
+          const patientId = body.patientId;
 
           if (!patientId) {
             return badRequest("patientId is required");
@@ -816,8 +820,8 @@ Bun.serve({
         // Parse request body for optional specialist filter
         let requestedSpecialists: string[] | undefined;
         try {
-          const body = await req.json();
-          requestedSpecialists = body.specialists;
+          const body = (await req.json()) as { specialists?: string[] };
+          requestedSpecialists = Array.isArray(body.specialists) ? body.specialists : undefined;
         } catch {
           // No body or invalid JSON - use all specialists
         }
@@ -1490,20 +1494,21 @@ Bun.serve({
 
     return response;
   },
-  error(err, req) {
+  error(err: unknown, req?: Request) {
     // Log 500 errors
     const start = performance.now();
-    const url = new URL(req.url);
-    const response = json({ error: err.message }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Unknown error";
+    const url = req ? new URL(req.url) : undefined;
+    const response = json({ error: message }, { status: 500 });
 
     logRequest({
       timestamp: new Date().toISOString(),
-      method: req.method,
-      path: url.pathname,
+      method: req?.method ?? "UNKNOWN",
+      path: url?.pathname ?? "unknown",
       status: 500,
       durationMs: Math.round(performance.now() - start),
-      ip: getClientIP(req),
-      userAgent: req.headers.get("user-agent") || "unknown",
+      ip: req ? getClientIP(req) : "unknown",
+      userAgent: req?.headers.get("user-agent") || "unknown",
     });
 
     return response;

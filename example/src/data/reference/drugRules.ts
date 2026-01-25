@@ -304,7 +304,7 @@ export const allergyContraindications: Record<
  * Get constraints for a medication.
  */
 export function getDrugConstraints(drugName: string): DrugRule | null {
-  const normalizedName = drugName.toLowerCase().split(" ")[0];
+  const normalizedName = drugName.toLowerCase().split(" ")[0] ?? "";
   return drugConstraints[normalizedName] || null;
 }
 

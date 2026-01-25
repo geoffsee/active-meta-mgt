@@ -19,6 +19,15 @@ export interface SubmitResult {
   error?: string;
 }
 
+type SubmitResponse = {
+  ingested?: number;
+  records?: unknown[];
+  record?: unknown;
+  error?: string;
+  message?: string;
+  cases?: Array<{ patientId?: string; username?: string; password?: string }>;
+};
+
 /**
  * Mock implementation of VitalsWatch Swift APIClient.
  * Replicates the exact behavior of the Swift client for testing.
@@ -113,7 +122,7 @@ export class MockWatchClient {
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as SubmitResponse;
 
       if (response.ok) {
         const result: SubmitResult = {
@@ -239,7 +248,7 @@ export async function importTestCase(
     throw new Error(`Failed to import test case: ${response.status} - ${errorText}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as SubmitResponse;
 
   // Response format: { ingested: N, cases: [{ patientId, username, password }], ... }
   const caseData = data.cases?.[0];

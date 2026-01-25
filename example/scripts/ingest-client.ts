@@ -34,7 +34,11 @@ async function readInput(): Promise<string> {
 
   if (args.length > 0) {
     // Read from file
-    return readFileSync(args[0], "utf-8");
+    const filePath = args[0];
+    if (!filePath) {
+      throw new Error("File path argument missing");
+    }
+    return readFileSync(filePath, "utf-8");
   }
 
   // Read from stdin

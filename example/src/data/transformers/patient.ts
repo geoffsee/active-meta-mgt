@@ -118,8 +118,7 @@ export function transformPatient(patient: Patient): TransformedPatient {
   // Constraints from ICD mapping
   // ============================================================================
 
-  for (let i = 0; i < icdScenario.constraints.length; i++) {
-    const c = icdScenario.constraints[i];
+  for (const [i, c] of icdScenario.constraints.entries()) {
     constraints.push({
       id: `constraint-icd-${i}-${patient.patient_id}`,
       statement: c.statement,
@@ -245,8 +244,7 @@ export function transformPatient(patient: Patient): TransformedPatient {
   // Assumptions from ICD mapping and patient factors
   // ============================================================================
 
-  for (let i = 0; i < icdScenario.assumptions.length; i++) {
-    const a = icdScenario.assumptions[i];
+  for (const [i, a] of icdScenario.assumptions.entries()) {
     assumptions.push({
       id: `assumption-icd-${i}-${patient.patient_id}`,
       statement: a.statement,
@@ -269,8 +267,7 @@ export function transformPatient(patient: Patient): TransformedPatient {
   // Questions from ICD mapping
   // ============================================================================
 
-  for (let i = 0; i < icdScenario.questions.length; i++) {
-    const q = icdScenario.questions[i];
+  for (const [i, q] of icdScenario.questions.entries()) {
     questions.push({
       id: `question-icd-${i}-${patient.patient_id}`,
       question: q.question,
