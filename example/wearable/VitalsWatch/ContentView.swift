@@ -144,6 +144,22 @@ struct ContentView: View {
     @State private var username: String = ""
     @State private var password: String = ""
 
+    init() {
+        // Disable animations in screenshot mode
+        if Config.isScreenshotMode {
+            UIView.setAnimationsEnabled(false)
+        }
+
+        // Initialize demo credentials in screenshot mode
+        if Config.isDemoCredentials {
+            Config.saveCredentials(
+                username: Config.demoUsername,
+                password: Config.demoPassword
+            )
+            Config.apiBaseURL = Config.demoServerURL
+        }
+    }
+
     private var isConnected: Bool {
         if case .connected = apiClient.connectionStatus {
             return true

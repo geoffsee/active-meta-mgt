@@ -69,6 +69,53 @@ struct Config {
     private static let defaultPassword = "YOUR_PASSWORD_HERE"
     private static let defaultServerURL = "http://localhost:3333"
 
+    // MARK: - Screenshot Mode (Launch Arguments)
+
+    /// Check if running in screenshot mode (for App Store screenshots)
+    /// Pass -SCREENSHOT_MODE YES as launch argument to enable
+    static var isScreenshotMode: Bool {
+        ProcessInfo.processInfo.arguments.contains("-SCREENSHOT_MODE")
+    }
+
+    /// Check if demo vitals should be pre-populated
+    /// Pass -DEMO_VITALS YES as launch argument to enable
+    static var isDemoVitals: Bool {
+        ProcessInfo.processInfo.arguments.contains("-DEMO_VITALS")
+    }
+
+    /// Check if demo credentials should be used
+    /// Pass -DEMO_CREDENTIALS YES as launch argument to enable
+    static var isDemoCredentials: Bool {
+        ProcessInfo.processInfo.arguments.contains("-DEMO_CREDENTIALS")
+    }
+
+    // MARK: - Demo Values (for screenshots)
+
+    /// Demo credentials for screenshot mode
+    static let demoUsername = "case-demo"
+    static let demoPassword = "demo-password-123"
+    static let demoServerURL = "https://api.vitalswatch.example.com"
+
+    /// Demo vital values for screenshot mode
+    static let demoVitals: DemoVitalsData = DemoVitalsData(
+        heartRate: 72,
+        spo2: 98,
+        systolicBP: 118,
+        diastolicBP: 76,
+        respiratoryRate: 16,
+        temperature: 36.8
+    )
+
+    /// Container for demo vital values
+    struct DemoVitalsData {
+        let heartRate: Double
+        let spo2: Double
+        let systolicBP: Double
+        let diastolicBP: Double
+        let respiratoryRate: Double
+        let temperature: Double
+    }
+
     // MARK: - Case Credentials (Stored in Keychain)
 
     /// Username for this case (generated when case is imported)

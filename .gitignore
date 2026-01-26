@@ -70,3 +70,8 @@ example/wearable/Gemfile.lock
 /example/wearable/VitalsWatch/Assets.xcassets/AppIcon.appiconset/
 /example/wearable/VitalsWatch Watch App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
 /example/wearable/scripts/generate-app-icons.sh
+/example/wearable/AppStore_com.geoffsee.VitalsWatch.mobileprovision
+/example/wearable/scripts/
+/example/wearable/VitalsWatchUIScreenshots/SnapshotHelper.swift
+/example/wearable/VitalsWatchUIScreenshots/VitalsWatchScreenshots.swift
+/example/wearable/VitalsWatchUITests/VitalsWatchScreenshotTests.swift

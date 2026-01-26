@@ -164,9 +164,31 @@ struct ContentView: View {
                 }
             }
             .onAppear {
+                // Disable animations in screenshot mode
+                if Config.isScreenshotMode {
+                    #if os(watchOS)
+                    // watchOS doesn't support UIView animations
+                    #else
+                    UIView.setAnimationsEnabled(false)
+                    #endif
+                }
+
+                // Initialize demo vitals if in demo mode
+                if Config.isDemoVitals {
+                    initializeDemoVitals()
+                }
+
+                // Initialize demo credentials if in demo mode
+                if Config.isDemoCredentials {
+                    initializeDemoCredentials()
+                }
+
                 Task {
-                    await healthKit.requestAuthorization()
-                    await healthKit.refreshVitals()
+                    // Skip HealthKit in screenshot mode to avoid permission dialogs
+                    if !Config.isScreenshotMode {
+                        await healthKit.requestAuthorization()
+                        await healthKit.refreshVitals()
+                    }
                 }
             }
             .sheet(isPresented: $showManualEntry) {
@@ -299,6 +321,29 @@ struct ContentView: View {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter
+    }
+
+    // MARK: - Demo Mode Initialization
+
+    /// Initialize demo vital values for screenshot mode
+    private func initializeDemoVitals() {
+        let demo = Config.demoVitals
+        manualHeartRate = demo.heartRate
+        manualSpO2 = demo.spo2
+        manualSystolicBP = demo.systolicBP
+        manualDiastolicBP = demo.diastolicBP
+        manualRespiratoryRate = demo.respiratoryRate
+        manualTemperature = demo.temperature
+    }
+
+    /// Initialize demo credentials for screenshot mode
+    private func initializeDemoCredentials() {
+        // Set demo credentials in Config (stored in Keychain)
+        Config.saveCredentials(
+            username: Config.demoUsername,
+            password: Config.demoPassword
+        )
+        Config.apiBaseURL = Config.demoServerURL
     }
 }
 
