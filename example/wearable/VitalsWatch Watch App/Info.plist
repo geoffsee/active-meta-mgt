@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>VitalsWatch needs access to your health data to read vital signs such as heart rate, SpO2, blood pressure, respiratory rate, and body temperature for submission to your clinical care team.</string>
 	<key>WKApplication</key>

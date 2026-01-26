@@ -49,3 +49,24 @@ evaluations.jsonl
 .wrangler/
 /example/.dev.vars
 example/.playwright-mcp/
+
+# Fastlane artifacts
+example/wearable/fastlane/build_output/
+example/wearable/fastlane/report.xml
+example/wearable/fastlane/Preview.html
+example/wearable/fastlane/screenshots/
+example/wearable/fastlane/test_output/
+example/wearable/fastlane/*.ipa
+example/wearable/fastlane/*.dSYM.zip
+example/wearable/fastlane/AuthKey*.p8
+example/wearable/fastlane/.env
+example/wearable/fastlane/.env.local
+example/wearable/vendor/
+example/wearable/.bundle/
+example/wearable/Gemfile.lock
+/example/wearable/fastlane/*Key_*.*
+/example/wearable/fastlane/
+.playwright-mcp/
+/example/wearable/VitalsWatch/Assets.xcassets/AppIcon.appiconset/
+/example/wearable/VitalsWatch Watch App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+/example/wearable/scripts/generate-app-icons.sh
