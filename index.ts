@@ -24,88 +24,195 @@ export { types, type Instance, type SnapshotIn } from "mobx-state-tree";
 
 /** ---------- Hook Types ---------- */
 
+/**
+ * The six types of knowledge objects managed by the framework.
+ * Used for type discrimination in hook events and item references.
+ */
 export type KnowledgeObjectKind = "goal" | "constraint" | "assumption" | "evidence" | "question" | "decision";
 
+/**
+ * Base interface for all hook events.
+ * All events include timing and context identification.
+ */
 export interface HookEventBase {
+    /** The event type identifier (e.g., "knowledgeObject:upserted") */
     type: string;
+    /** ISO 8601 timestamp when the event was emitted */
     timestamp: string;
+    /** The ID of the ActiveMetaContext that emitted this event */
     contextId: string;
 }
 
+/**
+ * Emitted when a knowledge object (goal, constraint, assumption, evidence, question, or decision)
+ * is created or updated via an upsert action.
+ *
+ * @example
+ * ```typescript
+ * ctx.hooks.on("knowledgeObject:upserted", (event) => {
+ *     if (event.isNew && event.kind === "evidence") {
+ *         console.log(`New evidence added: ${event.id}`);
+ *     }
+ * });
+ * ```
+ */
 export interface KnowledgeObjectUpsertedEvent extends HookEventBase {
     type: "knowledgeObject:upserted";
+    /** The type of knowledge object that was upserted */
     kind: KnowledgeObjectKind;
+    /** The unique identifier of the upserted item */
     id: string;
+    /** A snapshot of the item's data at the time of the event (immutable copy) */
     item: Record<string, unknown>;
+    /** True if this was a new item, false if it was an update to an existing item */
     isNew: boolean;
 }
 
+/**
+ * Emitted when a new context lane is created via `ensureLane()`.
+ * Not emitted when updating an existing lane's name.
+ */
 export interface LaneCreatedEvent extends HookEventBase {
     type: "lane:created";
+    /** The unique identifier of the newly created lane */
     laneId: string;
+    /** The display name of the lane */
     name: string;
 }
 
+/**
+ * Emitted when a lane is removed via `removeLane()`.
+ */
 export interface LaneRemovedEvent extends HookEventBase {
     type: "lane:removed";
+    /** The unique identifier of the removed lane */
     laneId: string;
 }
 
+/**
+ * Emitted when a lane's status changes via `setLaneStatus()`.
+ * Not emitted if the new status equals the current status.
+ */
 export interface LaneStatusChangedEvent extends HookEventBase {
     type: "lane:statusChanged";
+    /** The unique identifier of the lane */
     laneId: string;
+    /** The previous status before the change */
     oldStatus: "enabled" | "muted" | "disabled";
+    /** The new status after the change */
     newStatus: "enabled" | "muted" | "disabled";
 }
 
+/**
+ * Emitted when an item is pinned or unpinned in a lane via `pinInLane()` or `unpinInLane()`.
+ */
 export interface LanePinChangedEvent extends HookEventBase {
     type: "lane:pinChanged";
+    /** The unique identifier of the lane */
     laneId: string;
+    /** The type of knowledge object being pinned/unpinned */
     kind: KnowledgeObjectKind;
+    /** The unique identifier of the item being pinned/unpinned */
     itemId: string;
+    /** True if the item was pinned, false if unpinned */
     pinned: boolean;
 }
 
+/**
+ * Emitted when a single lane's selection is refreshed via `refreshLaneSelection()`.
+ */
 export interface LaneRefreshedEvent extends HookEventBase {
     type: "lane:refreshed";
+    /** The unique identifier of the refreshed lane */
     laneId: string;
+    /** The number of items selected in this lane */
     selectedCount: number;
+    /** Array of selected item references with their scores */
     selected: Array<{ kind: string; id: string; score: number; pinned: boolean }>;
 }
 
+/**
+ * Emitted when all lanes are refreshed via `refreshAllLanes()`.
+ */
 export interface LanesRefreshedAllEvent extends HookEventBase {
     type: "lanes:refreshedAll";
+    /** Array of all lane IDs that were refreshed */
     laneIds: string[];
+    /** Total number of selected items across all enabled lanes */
     totalSelected: number;
 }
 
+/**
+ * Emitted when lane selections are merged into the active window via `mergeLanesToActiveWindow()`.
+ */
 export interface ActiveWindowMergedEvent extends HookEventBase {
     type: "activeWindow:merged";
+    /** The number of unique items in the merged active window */
     mergedCount: number;
+    /** Array of lane IDs that contributed to the merge (enabled lanes only) */
     fromLanes: string[];
+    /** Array of merged item references with their scores */
     selected: Array<{ kind: string; id: string; score: number; pinned: boolean }>;
 }
 
+/**
+ * Emitted when working memory is synthesized via `synthesizeWorkingMemory()` or `synthesizeFromLanes()`.
+ * This event fires after `archive:created`.
+ */
 export interface WorkingMemorySynthesizedEvent extends HookEventBase {
     type: "workingMemory:synthesized";
+    /** The token budget that was requested for synthesis */
     tokenBudget: number;
+    /** The actual token count of the synthesized text (approximate) */
     actualTokens: number;
+    /** The synthesized working memory text */
     text: string;
+    /** The ID of the archive entry created for this synthesis */
     archiveId: string;
 }
 
+/**
+ * Emitted when an archive entry is created during synthesis.
+ * This event fires before `workingMemory:synthesized`.
+ */
 export interface ArchiveCreatedEvent extends HookEventBase {
     type: "archive:created";
+    /** The unique identifier of the new archive entry */
     archiveId: string;
+    /** The number of items that were archived */
     mergedCount: number;
 }
 
+/**
+ * Emitted when evidence is ingested via the `ingestEvidence()` flow.
+ * This event fires after all other events triggered by the ingestion.
+ */
 export interface EvidenceIngestedEvent extends HookEventBase {
     type: "evidence:ingested";
+    /** The unique identifier of the ingested evidence */
     evidenceId: string;
+    /** True if synthesis was performed during ingestion */
     synthesized: boolean;
 }
 
+/**
+ * Union type of all possible hook events.
+ * Use discriminated union pattern with the `type` field to narrow to specific event types.
+ *
+ * @example
+ * ```typescript
+ * ctx.hooks.onAny((event: HookEvent) => {
+ *     switch (event.type) {
+ *         case "knowledgeObject:upserted":
+ *             console.log(event.kind, event.id); // TypeScript knows these exist
+ *             break;
+ *         case "lane:created":
+ *             console.log(event.laneId); // TypeScript knows this exists
+ *             break;
+ *     }
+ * });
+ * ```
+ */
 export type HookEvent =
     | KnowledgeObjectUpsertedEvent
     | LaneCreatedEvent
@@ -119,9 +226,25 @@ export type HookEvent =
     | ArchiveCreatedEvent
     | EvidenceIngestedEvent;
 
+/**
+ * String literal union of all hook event type identifiers.
+ * Useful for type-safe event type references.
+ */
 export type HookEventType = HookEvent["type"];
 
-/** Type map for inferring specific event types from string literals */
+/**
+ * Type map for inferring specific event types from string literals.
+ * Used internally by `hooks.on()` and `hooks.once()` to provide
+ * type-safe event handling.
+ *
+ * @example
+ * ```typescript
+ * // TypeScript infers event as KnowledgeObjectUpsertedEvent
+ * ctx.hooks.on("knowledgeObject:upserted", (event) => {
+ *     console.log(event.kind); // No type assertion needed
+ * });
+ * ```
+ */
 export interface HookEventMap {
     "knowledgeObject:upserted": KnowledgeObjectUpsertedEvent;
     "lane:created": LaneCreatedEvent;
@@ -136,8 +259,31 @@ export interface HookEventMap {
     "evidence:ingested": EvidenceIngestedEvent;
 }
 
+/**
+ * Function type for hook event listeners.
+ *
+ * @typeParam T - The specific event type this listener handles (defaults to any HookEvent)
+ *
+ * @example
+ * ```typescript
+ * const listener: HookListener<KnowledgeObjectUpsertedEvent> = (event) => {
+ *     console.log(`${event.kind} ${event.id} was ${event.isNew ? 'created' : 'updated'}`);
+ * };
+ * ```
+ */
 export type HookListener<T extends HookEvent = HookEvent> = (event: T) => void;
 
+/**
+ * Function returned by hook subscription methods to unsubscribe the listener.
+ * Call this function to stop receiving events.
+ *
+ * @example
+ * ```typescript
+ * const unsubscribe: Unsubscribe = ctx.hooks.on("lane:created", handler);
+ * // Later, when you want to stop listening:
+ * unsubscribe();
+ * ```
+ */
 export type Unsubscribe = () => void;
 
 /** ---------- Primitives ---------- */
@@ -299,22 +445,54 @@ const ContextItemKind = types.enumeration("ContextItemKind", [
     "decision",
 ]);
 
+/**
+ * Reference to a knowledge object within a context window or selection.
+ * Used for tracking which items are selected in lanes and the active window.
+ */
 const ContextItemRef = types.model("ContextItemRef", {
+    /** The type of knowledge object being referenced */
     kind: ContextItemKind,
+    /** The unique identifier of the referenced item */
     id: types.string,
+    /** Computed relevance score (higher = more relevant) */
     score: types.optional(types.number, 0),
+    /** Whether this item is explicitly pinned (always included) */
     pinned: types.optional(types.boolean, false),
 });
 
+/**
+ * Configuration for how items are scored and selected within a lane or window.
+ *
+ * Scoring formula: `wSeverity * severity + wConfidence * confidence + wPriority * priority + wRecency * recency`
+ * Pinned items receive `wPinnedBoost` instead of the computed score.
+ *
+ * @example
+ * ```typescript
+ * // Configure a lane to prioritize high-severity evidence
+ * ctx.lanes.get("security")?.setWindowPolicy({
+ *     maxItems: 15,
+ *     wSeverity: 2.0,    // Double weight for severity
+ *     wConfidence: 0.5,  // Lower weight for confidence
+ *     wRecency: 0.3,     // Moderate recency bonus
+ * });
+ * ```
+ */
 const SelectionPolicy = types.model("SelectionPolicy", {
+    /** Maximum number of items to include in selection (default: 30) */
     maxItems: types.optional(types.number, 30),
 
+    /** Weight multiplier for evidence severity in scoring (default: 1.0) */
     wSeverity: types.optional(types.number, 1.0),
+    /** Weight multiplier for confidence level in scoring (default: 0.7) */
     wConfidence: types.optional(types.number, 0.7),
+    /** Weight multiplier for priority level in scoring (default: 0.8) */
     wPriority: types.optional(types.number, 0.8),
+    /** Score boost applied to pinned items (default: 1000, effectively always included) */
     wPinnedBoost: types.optional(types.number, 1000),
+    /** Weight multiplier for recency (exponential decay) in scoring (default: 0.1) */
     wRecency: types.optional(types.number, 0.1),
 
+    /** Which knowledge object types to include in selection (default: all types) */
     includeKinds: types.optional(types.array(ContextItemKind), [
         "goal",
         "constraint",
@@ -327,13 +505,51 @@ const SelectionPolicy = types.model("SelectionPolicy", {
 
 /** ---------- Hook Registry ---------- */
 
+/**
+ * MST model for managing lifecycle hook subscriptions.
+ *
+ * The HookRegistry provides a reactive event system for observing framework state changes.
+ * It follows these design principles:
+ * - **After-only**: Events fire after state changes complete (not before)
+ * - **Non-blocking**: Hook errors are isolated and logged, never break the framework
+ * - **Composable**: Multiple listeners can subscribe to the same event
+ * - **Type-safe**: Full TypeScript inference for event payloads
+ *
+ * Listener state is stored in volatile (non-serialized) fields, so subscriptions
+ * are not persisted across snapshots or hydration.
+ *
+ * @example
+ * ```typescript
+ * const ctx = makeDefaultActiveMetaContext("my-context");
+ *
+ * // Subscribe to specific events
+ * const unsub = ctx.hooks.on("knowledgeObject:upserted", (event) => {
+ *     console.log(`${event.kind} ${event.id} was ${event.isNew ? 'created' : 'updated'}`);
+ * });
+ *
+ * // Subscribe to all events for logging
+ * ctx.hooks.onAny((event) => {
+ *     console.log(`[${event.timestamp}] ${event.type}`);
+ * });
+ *
+ * // Cleanup when done
+ * unsub();
+ * ctx.hooks.offAll();
+ * ```
+ */
 const HookRegistry = types
     .model("HookRegistry", {})
     .volatile(() => ({
+        /** Map of event type to set of listeners for that type */
         listeners: new Map<string, Set<HookListener<HookEvent>>>(),
+        /** Set of listeners that receive all events */
         wildcardListeners: new Set<HookListener<HookEvent>>(),
     }))
     .views((self) => ({
+        /**
+         * Returns the total number of active listeners (type-specific + wildcard).
+         * Useful for debugging or monitoring subscription state.
+         */
         get listenerCount(): number {
             let count = self.wildcardListeners.size;
             for (const set of self.listeners.values()) {
@@ -343,6 +559,25 @@ const HookRegistry = types
         },
     }))
     .actions((self) => ({
+        /**
+         * Subscribe to a specific event type with full type inference.
+         *
+         * @typeParam K - The event type key (inferred from eventType parameter)
+         * @param eventType - The event type to subscribe to (e.g., "knowledgeObject:upserted")
+         * @param listener - Callback function invoked when the event fires
+         * @returns Unsubscribe function to remove this listener
+         *
+         * @example
+         * ```typescript
+         * const unsub = ctx.hooks.on("lane:created", (event) => {
+         *     // TypeScript knows event is LaneCreatedEvent
+         *     console.log(`Lane ${event.laneId} created with name "${event.name}"`);
+         * });
+         *
+         * // Later: stop listening
+         * unsub();
+         * ```
+         */
         on<K extends keyof HookEventMap>(
             eventType: K,
             listener: HookListener<HookEventMap[K]>
@@ -364,6 +599,20 @@ const HookRegistry = types
             };
         },
 
+        /**
+         * Subscribe to all events (wildcard listener).
+         * Useful for logging, debugging, or cross-cutting concerns.
+         *
+         * @param listener - Callback function invoked for every event
+         * @returns Unsubscribe function to remove this listener
+         *
+         * @example
+         * ```typescript
+         * ctx.hooks.onAny((event) => {
+         *     console.log(`[${event.contextId}] ${event.type} at ${event.timestamp}`);
+         * });
+         * ```
+         */
         onAny(listener: HookListener<HookEvent>): Unsubscribe {
             self.wildcardListeners.add(listener);
             return () => {
@@ -371,6 +620,22 @@ const HookRegistry = types
             };
         },
 
+        /**
+         * Subscribe to a specific event type for one-time delivery.
+         * The listener is automatically unsubscribed after the first event.
+         *
+         * @typeParam K - The event type key (inferred from eventType parameter)
+         * @param eventType - The event type to subscribe to
+         * @param listener - Callback function invoked once when the event fires
+         * @returns Unsubscribe function to cancel before the event fires
+         *
+         * @example
+         * ```typescript
+         * ctx.hooks.once("workingMemory:synthesized", (event) => {
+         *     console.log(`First synthesis complete: ${event.actualTokens} tokens`);
+         * });
+         * ```
+         */
         once<K extends keyof HookEventMap>(
             eventType: K,
             listener: HookListener<HookEventMap[K]>
@@ -383,15 +648,42 @@ const HookRegistry = types
             return unsub;
         },
 
+        /**
+         * Remove all listeners for a specific event type.
+         *
+         * @param eventType - The event type to clear listeners for
+         *
+         * @example
+         * ```typescript
+         * ctx.hooks.off("knowledgeObject:upserted");
+         * ```
+         */
         off(eventType: HookEventType): void {
             self.listeners.delete(eventType);
         },
 
+        /**
+         * Remove all listeners (both type-specific and wildcard).
+         * Useful for cleanup or resetting the hook state.
+         *
+         * @example
+         * ```typescript
+         * // Clean up all subscriptions
+         * ctx.hooks.offAll();
+         * ```
+         */
         offAll(): void {
             self.listeners.clear();
             self.wildcardListeners.clear();
         },
 
+        /**
+         * Internal method to emit an event to all relevant listeners.
+         * Errors in listeners are caught and logged but do not propagate.
+         *
+         * @param event - The fully-formed event object to emit
+         * @internal This method is called by framework actions; do not call directly.
+         */
         _emit(event: HookEvent): void {
             // Fire type-specific listeners
             const typeListeners = self.listeners.get(event.type);
@@ -416,16 +708,25 @@ const HookRegistry = types
         },
     }));
 
+/**
+ * A selection window that holds scored item references and selection policy.
+ * Used both in lanes (per-lane selection) and as the unified active window.
+ */
 const ContextWindow = types
     .model("ContextWindow", {
+        /** Configuration for how items are scored and selected */
         policy: types.optional(SelectionPolicy, {}),
+        /** Currently selected item references with scores */
         selected: types.optional(types.array(ContextItemRef), []),
+        /** When this window was last refreshed */
         lastRefreshedAt: types.maybe(ISODateString),
     })
     .actions((self) => ({
+        /** Update the selection policy with partial values */
         setPolicy(patch: Partial<SnapshotIn<typeof SelectionPolicy>>) {
             Object.assign(self.policy, patch);
         },
+        /** Replace the selected items and update refresh timestamp */
         setSelected(items: SnapshotIn<typeof ContextItemRef>[]) {
             self.selected.replace(items as Instance<typeof ContextItemRef>[]);
             self.lastRefreshedAt = new Date().toISOString();
@@ -434,23 +735,51 @@ const ContextWindow = types
 
 /** ---------- Lanes ---------- */
 
+/**
+ * Status values for a context lane.
+ * - **enabled**: Lane participates in merge and synthesis
+ * - **muted**: Lane is refreshed but excluded from merge (preserved for later)
+ * - **disabled**: Lane is not refreshed and excluded from merge
+ */
 const LaneStatus = types.enumeration("LaneStatus", ["enabled", "muted", "disabled"]);
 
+/**
+ * A context lane represents a separate selection domain with its own policy and filtering.
+ *
+ * Lanes allow you to organize knowledge objects into logical groups (e.g., "legal", "security", "task")
+ * and apply different selection policies to each. During merge, enabled lanes contribute their
+ * selections to the unified active window.
+ *
+ * @example
+ * ```typescript
+ * // Create a lane for security-related items
+ * ctx.ensureLane("security", "Security & Threats");
+ *
+ * // Configure the lane
+ * ctx.lanes.get("security")?.setWindowPolicy({ maxItems: 15, wSeverity: 2.0 });
+ * ctx.lanes.get("security")?.setIncludeTagsAny([{ key: "lane", value: "security" }]);
+ *
+ * // Pin critical items
+ * ctx.pinInLane("security", "evidence", "critical-vuln-1");
+ * ```
+ */
 const ContextLane = types
     .model("ContextLane", {
+        /** Unique identifier for this lane */
         id: types.identifier,
-        name: types.string, // e.g. "task", "legal", "personal", ...
+        /** Human-readable display name (e.g., "task", "legal", "personal") */
+        name: types.string,
+        /** Whether this lane is enabled, muted, or disabled */
         status: types.optional(LaneStatus, "enabled"),
-
-        // Lane-local window controls selection within lane.
+        /** Lane-local selection window with its own policy */
         window: types.optional(ContextWindow, {}),
-
-        // Lane-local membership constraints (optional but powerful):
-        // - If set, only items matching at least one of these tags are candidates for this lane.
-        // - Use tags like {key:"lane", value:"legal"} or {key:"domain", value:"security"} etc.
+        /**
+         * Tag filters for lane membership. If set, only items matching at least one
+         * of these tags are candidates for this lane. Empty means all items are candidates.
+         * @example `[{ key: "lane", value: "legal" }, { key: "domain", value: "compliance" }]`
+         */
         includeTagsAny: types.optional(types.array(Tag), []),
-
-        // Additional pinned refs explicitly for this lane (also can appear inside window.selected)
+        /** Explicitly pinned item references for this lane */
         pinned: types.optional(types.array(ContextItemRef), []),
     })
     .actions((self) => ({
@@ -479,28 +808,68 @@ const ContextLane = types
 
 /** ---------- Working Memory & Archive ---------- */
 
+/**
+ * The synthesized working memory note produced from merged lane selections.
+ * Contains a token-budgeted condensed text representation of active context.
+ */
 const WorkingMemory = types.model("WorkingMemory", {
+    /** The synthesized text content */
     text: types.optional(types.string, ""),
+    /** When the working memory was last updated */
     updatedAt: types.maybe(ISODateString),
-    // The lane merge + synthesis can store provenance about how it was created
+    /** Reference to the archive entry created during synthesis */
     lastArchiveId: types.maybe(types.string),
 });
 
+/**
+ * A snapshot of the context state at a point in time.
+ * Created during synthesis for audit trail and potential rollback.
+ */
 const ArchiveEntry = types.model("ArchiveEntry", {
+    /** Unique identifier for this archive entry */
     id: types.identifier,
+    /** When this archive was created */
     createdAt: types.optional(ISODateString, () => new Date().toISOString()),
-
-    // What was active at the time (refs), plus a condensed note
+    /** The merged item references at the time of archival */
     mergedSelected: types.optional(types.array(ContextItemRef), []),
+    /** The working memory text that was generated */
     workingMemoryText: types.optional(types.string, ""),
-
-    // Snapshot of the framework state (optional but useful for rollback/audit)
-    // Keep it small in production or store externally.
+    /** Full MST snapshot for rollback capability (can be large) */
     snapshot: types.frozen(),
 });
 
 /** ---------- Framework Root ---------- */
 
+/**
+ * The root MST model for the Active Meta-Context Management Framework.
+ *
+ * ActiveMetaContext provides:
+ * - **Knowledge Objects**: Six types (goals, constraints, assumptions, evidence, questions, decisions)
+ * - **Context Lanes**: Separate selection domains with configurable policies and tag filtering
+ * - **Merge & Synthesis**: Combine lanes into a unified active window with token-budgeted working memory
+ * - **Archive System**: Full snapshots for audit trail and rollback
+ * - **Lifecycle Hooks**: Reactive event system for observing state changes
+ *
+ * @example
+ * ```typescript
+ * // Create a context
+ * const ctx = ActiveMetaContext.create({ id: "my-context" });
+ *
+ * // Add knowledge objects
+ * ctx.upsertGoal({ id: "g1", title: "Complete feature", priority: "p0" });
+ * ctx.upsertEvidence({ id: "e1", summary: "User feedback", severity: "high" });
+ *
+ * // Set up lanes and synthesize
+ * ctx.ensureLane("task", "Task Lane");
+ * ctx.synthesizeFromLanes({ tokenBudget: 500 });
+ *
+ * // Get LLM-ready payload
+ * const payload = ctx.buildLLMContextPayload();
+ *
+ * // Subscribe to events
+ * ctx.hooks.on("knowledgeObject:upserted", (e) => console.log(e.kind, e.id));
+ * ```
+ */
 export const ActiveMetaContext = types
     .model("ActiveMetaContext", {
         id: types.identifier,
@@ -1191,13 +1560,68 @@ export const ActiveMetaContext = types
     });
 
 /** ---------- Types ---------- */
+
+/**
+ * Instance type for the ActiveMetaContext MST model.
+ * Use this type when you need to reference the context in TypeScript.
+ *
+ * @example
+ * ```typescript
+ * function processContext(ctx: ActiveMetaContextInstance) {
+ *     ctx.upsertGoal({ id: "g1", title: "Example" });
+ *     ctx.synthesizeFromLanes();
+ * }
+ * ```
+ */
 export type ActiveMetaContextInstance = Instance<typeof ActiveMetaContext>;
+
+/**
+ * Instance type for the HookRegistry MST model.
+ * Typically accessed via `ctx.hooks` rather than used directly.
+ */
 export type HookRegistryInstance = Instance<typeof HookRegistry>;
 
 /** ---------- Suggested defaults helper (optional) ---------- */
+
+/**
+ * Creates an ActiveMetaContext with sensible default lanes pre-configured.
+ *
+ * This factory function creates a context with five common lanes:
+ * - **task** - General task-related items (maxItems: 20)
+ * - **legal** - Legal and compliance items (maxItems: 20)
+ * - **personal** - Personal/user-specific items (maxItems: 10)
+ * - **threat-model** - Security and threat modeling items (maxItems: 15)
+ * - **implementation** - Technical implementation items (maxItems: 25)
+ *
+ * Each lane is configured to filter items by the tag `{key: "lane", value: "<lane-name>"}`.
+ * The active window has a combined max of 35 items.
+ *
+ * @param id - The unique identifier for the context
+ * @returns A new ActiveMetaContext instance with default lanes
+ *
+ * @example
+ * ```typescript
+ * const ctx = makeDefaultActiveMetaContext("my-project");
+ *
+ * // Add items with lane tags
+ * ctx.upsertGoal({
+ *     id: "g1",
+ *     title: "Implement feature X",
+ *     tags: [{ key: "lane", value: "task" }],
+ * });
+ *
+ * ctx.upsertEvidence({
+ *     id: "e1",
+ *     summary: "GDPR compliance required",
+ *     tags: [{ key: "lane", value: "legal" }],
+ * });
+ *
+ * // Synthesize and get LLM payload
+ * ctx.synthesizeFromLanes({ tokenBudget: 500 });
+ * const payload = ctx.buildLLMContextPayload();
+ * ```
+ */
 export function makeDefaultActiveMetaContext(id: string) {
-    // Create with common lanes + tag filters
-    // Convention: tag items with {key:"lane", value:"legal"} etc.
     return ActiveMetaContext.create({
         id,
         lanes: {
