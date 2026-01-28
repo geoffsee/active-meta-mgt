@@ -21,7 +21,7 @@ This ensures the watch can only submit data for its assigned patient.
 ## Project Structure
 
 ```
-/example/wearable/
+examples/VitalsWatch/client/
 ├── VitalsWatch Watch App/          # watchOS app (main)
 │   ├── VitalsWatchApp.swift        # App entry point
 │   ├── ContentView.swift           # Main vitals display
@@ -77,7 +77,7 @@ Save the `username` and `password` for the watch configuration.
    - Interface: **SwiftUI**
    - Language: **Swift**
    - Watch-only App: **No** (we want iOS companion)
-4. Save to `/example/wearable/`
+4. Save to `examples/VitalsWatch/client/`
 
 ### 3. Add Source Files
 
@@ -138,7 +138,7 @@ VitalsWatch includes two layers of automated testing:
 Fast, CI-friendly tests that verify the server API behaves correctly:
 
 ```bash
-cd /path/to/example
+cd examples/VitalsWatch/server
 
 # Start the server (in one terminal)
 bun run src/server.ts
@@ -158,7 +158,7 @@ The tests cover:
 End-to-end tests that run on the actual watchOS simulator:
 
 ```bash
-cd /path/to/example/wearable
+cd examples/VitalsWatch/client
 
 # Run automated watchOS UI tests
 ./scripts/run-watch-tests.sh
@@ -211,7 +211,7 @@ The watchOS simulator doesn't have real HealthKit data, but you can:
 
 1. Start the example server:
    ```bash
-   cd /path/to/example
+   cd examples/VitalsWatch/server
    bun run src/server.ts
    ```
 
