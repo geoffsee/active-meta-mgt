@@ -18,7 +18,7 @@
 # One-time Xcode project setup:
 #   1. File → New → Project → watchOS → App
 #   2. Product Name: VitalsWatch, Interface: SwiftUI
-#   3. Save to: example/wearable/
+#   3. Save to: examples/VitalsWatch/client/
 #   4. Add source files from VitalsWatch Watch App/ and Shared/
 #   5. Add UI Test target: File → New → Target → watchOS → UI Testing Bundle
 #   6. Enable HealthKit capability

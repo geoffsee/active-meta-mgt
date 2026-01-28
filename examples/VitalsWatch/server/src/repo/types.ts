@@ -263,7 +263,7 @@ export type RepoRuntime = "bun" | "cloudflare";
 
 export interface BunRepoConfig {
   runtime: "bun";
-  dataDir?: string; // defaults to example/data
+  dataDir?: string; // defaults to data
 }
 
 export interface CloudflareRepoConfig {

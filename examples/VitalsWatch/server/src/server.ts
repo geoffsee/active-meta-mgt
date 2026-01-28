@@ -340,7 +340,7 @@ function unauthorizedResponse(message: string, statusCode: number = 401) {
     }
   );
 }
-const publicDirFallback = new URL("./example/public/", `file://${process.cwd()}/`);
+const publicDirFallback = new URL("./public/", `file://${process.cwd()}/`);
 async function resolvePublicFile(path: string): Promise<{ file: Blob; url: URL }> {
   const primaryUrl = new URL(path, publicDir);
   const fallbackUrl = new URL(path, publicDirFallback);

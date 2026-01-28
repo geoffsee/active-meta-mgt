@@ -638,7 +638,7 @@ export class BunRequestLogRepo implements IRequestLogRepo {
 // =============================================================================
 
 export function createBunRepoContext(config: BunRepoConfig): IRepoContext {
-  const dataDir = config.dataDir || resolve(process.cwd(), "example/data");
+  const dataDir = config.dataDir || resolve(process.cwd(), "data");
 
   const ingest = new BunIngestRepo(dataDir);
   const evaluations = new BunEvaluationRepo(dataDir);
