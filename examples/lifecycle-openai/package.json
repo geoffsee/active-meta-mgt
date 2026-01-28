@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "start": "bun run main.ts"
+  },
+  "dependencies": {
+    "openai": "^6.16.0",
+    "active-meta-mgt": "file:.."
+  }
+}
