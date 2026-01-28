@@ -1,6 +1,6 @@
 {
   "name": "active-meta-mgt",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "description": "Token-budgeted context management framework with MobX-State-Tree for organizing knowledge objects across multiple context lanes",
   "author": "Geoff Seemueller",
   "license": "MIT",
@@ -40,7 +40,7 @@
   "scripts": {
     "build": "bun build ./index.ts ./custom_tokenizer.ts --outdir ./dist --target node --external mobx-state-tree --external @huggingface/transformers",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "test": "vitest run",
     "prepublishOnly": "bun run build",
     "dev": "(cd example && wrangler dev)"
   },
@@ -49,7 +49,8 @@
     "mobx-state-tree": "^7.0.2"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "vitest": "^4.0.18"
   },
   "peerDependencies": {
     "typescript": "^5"

@@ -36,18 +36,18 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 /C????E.md
 
 # Example datasets (download via scripts/download-data.sh)
-examples/VitalsWatch/server/data/mimic-iii/
-examples/VitalsWatch/server/data/source/
-examples/VitalsWatch/server/data/reference/
-examples/VitalsWatch/server/data/patients.csv
-examples/VitalsWatch/server/data/reference-ranges.json
+examples/vitalsWatch/server/data/mimic-iii/
+examples/vitalsWatch/server/data/source/
+examples/vitalsWatch/server/data/reference/
+examples/vitalsWatch/server/data/patients.csv
+examples/vitalsWatch/server/data/reference-ranges.json
 evaluations.jsonl
 # Keep READMEs
-!examples/VitalsWatch/server/data/README.md
+!examples/vitalsWatch/server/data/README.md
 
 # Wrangler (Cloudflare Workers)
 .wrangler/
-examples/VitalsWatch/server/.dev.vars
+examples/vitalsWatch/server/.dev.vars
 .playwright-mcp/
 
 # Fastlane artifacts

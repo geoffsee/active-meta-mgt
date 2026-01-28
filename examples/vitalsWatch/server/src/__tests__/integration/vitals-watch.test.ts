@@ -5,7 +5,7 @@
  * Run with: bun test src/__tests__/integration/vitals-watch.test.ts
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import {
   MockWatchClient,
   createAuthenticatedClient,

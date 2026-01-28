@@ -206,7 +206,7 @@ Every synthesis creates an `ArchiveEntry` with merged refs, working memory text,
 
 ## Example Application
 
-See [`examples/VitalsWatch/`](./examples/VitalsWatch/) for a full-stack example (Apple Watch + Cloudflare Workers server) demonstrating the framework in a clinical vitals monitoring scenario.
+See [`examples/vitalsWatch/`](./examples/VitalsWatch/) for a full-stack example (Apple Watch + Cloudflare Workers server) demonstrating the framework in a clinical vitals monitoring scenario.
 
 ## Commands
 

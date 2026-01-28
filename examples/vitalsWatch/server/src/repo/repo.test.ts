@@ -2,7 +2,7 @@
  * Tests for the repository abstraction layer.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "vitest";
 import { resolve } from "path";
 import { mkdirSync, rmSync, existsSync } from "fs";
 import {
@@ -11,7 +11,11 @@ import {
   DEFAULT_PATIENT_COOLDOWN_MS,
 } from "./index";
 
-const TEST_DATA_DIR = resolve(import.meta.dir, "../../../data/test-repo");
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const TEST_DATA_DIR = resolve(__dirname, "../../../data/test-repo");
 
 describe("Repository Abstraction - Bun Implementation", () => {
   let repo: IRepoContext;
