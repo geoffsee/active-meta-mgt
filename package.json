@@ -41,6 +41,7 @@
     "build": "bun build ./index.ts ./custom_tokenizer.ts --outdir ./dist --target node --external mobx-state-tree --external @huggingface/transformers",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "fmt": "bunx prettier -w .",
     "prepublishOnly": "bun run build",
     "dev": "(cd example && wrangler dev)"
   },
@@ -51,6 +52,13 @@
   "devDependencies": {
     "@types/bun": "latest",
     "vitest": "^4.0.18"
+  },
+  "prettier": {
+    "semi": true,
+    "singleQuote": false,
+    "trailingComma": "all",
+    "printWidth": 100,
+    "tabWidth": 2
   },
   "peerDependencies": {
     "typescript": "^5"

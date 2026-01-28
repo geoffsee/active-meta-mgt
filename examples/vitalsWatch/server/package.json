@@ -14,6 +14,13 @@
     "cf:kv:create": "wrangler kv:namespace create PATIENTS_KV && wrangler kv:namespace create PATIENTS_KV --preview",
     "cf:secret:set": "wrangler secret put OPENAI_API_KEY"
   },
+  "prettier": {
+    "semi": true,
+    "singleQuote": false,
+    "trailingComma": "all",
+    "printWidth": 100,
+    "tabWidth": 2
+  },
   "dependencies": {
     "active-meta-mgt": "file:..",
     "csv-parse": "^6.1.0",
