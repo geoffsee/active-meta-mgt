@@ -218,6 +218,15 @@ bun run typecheck     # TypeScript type checking
 bun install           # Install dependencies
 ```
 
+## Who Is This For
+
+This framework is built for problems where "just pass the whole conversation to the LLM" doesn't work — because of token limits, auditability requirements, or the need to prioritize competing concerns.
+
+- **Regulated enterprises (finance, healthcare, legal)** — control what context the model sees, prove what it saw via the archive audit trail, and enforce domain boundaries between legal, engineering, and operational concerns.
+- **GRC / compliance platforms** — governance, risk, and compliance tooling where evidence, constraints, and decisions need structured tracking with confidence scores and severity, not free-text chat history.
+- **AI-assisted incident response / SOC tooling** — security operations where multiple information streams (alerts, threat intel, remediation decisions) compete for limited context and need prioritized synthesis under token budgets.
+- **Enterprise AI agent platforms** — multi-step agents that need persistent, structured working memory across turns rather than relying on raw conversation history.
+
 ## License
 
-MIT
+MIT © 2026 Geoff Seemueller
