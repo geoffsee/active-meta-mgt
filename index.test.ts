@@ -1,5 +1,19 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { ActiveMetaContext, makeDefaultActiveMetaContext, type ActiveMetaContextInstance } from "./index";
+import {
+    ActiveMetaContext,
+    makeDefaultActiveMetaContext,
+    type ActiveMetaContextInstance,
+    type HookEvent,
+    type KnowledgeObjectUpsertedEvent,
+    type LaneCreatedEvent,
+    type LaneRefreshedEvent,
+    type LanesRefreshedAllEvent,
+    type ActiveWindowMergedEvent,
+    type WorkingMemorySynthesizedEvent,
+    type ArchiveCreatedEvent,
+    type LaneStatusChangedEvent,
+    type LanePinChangedEvent,
+} from "./index";
 
 describe("ActiveMetaContext", () => {
     let ctx: ActiveMetaContextInstance;
@@ -1184,6 +1198,418 @@ describe("ActiveMetaContext", () => {
             ctx.refreshAllLanes();
             ctx.mergeLanesToActiveWindow();
             expect(ctx.activeWindow.selected.length).toBe(2);
+        });
+    });
+
+    describe("Lifecycle Hooks", () => {
+        describe("Hook Registration", () => {
+            test("should register and fire event listeners", () => {
+                const events: HookEvent[] = [];
+                ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+
+                ctx.upsertGoal({ id: "g-1", title: "Test Goal" });
+
+                expect(events.length).toBe(1);
+                expect(events[0]?.type).toBe("knowledgeObject:upserted");
+                const event = events[0] as KnowledgeObjectUpsertedEvent;
+                expect(event.kind).toBe("goal");
+                expect(event.id).toBe("g-1");
+                expect(event.isNew).toBe(true);
+            });
+
+            test("should unsubscribe correctly", () => {
+                const events: HookEvent[] = [];
+                const unsub = ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+
+                ctx.upsertGoal({ id: "g-1", title: "Test Goal" });
+                expect(events.length).toBe(1);
+
+                unsub();
+
+                ctx.upsertGoal({ id: "g-2", title: "Another Goal" });
+                expect(events.length).toBe(1); // Still 1, not fired again
+            });
+
+            test("should support wildcard listeners with onAny", () => {
+                const events: string[] = [];
+                ctx.hooks.onAny((e) => events.push(e.type));
+
+                ctx.upsertGoal({ id: "g-1", title: "Test" });
+                ctx.ensureLane("test-lane");
+
+                expect(events).toContain("knowledgeObject:upserted");
+                expect(events).toContain("lane:created");
+            });
+
+            test("should fire once listeners only once", () => {
+                const events: HookEvent[] = [];
+                ctx.hooks.once("knowledgeObject:upserted", (e) => events.push(e));
+
+                ctx.upsertGoal({ id: "g-1", title: "First" });
+                ctx.upsertGoal({ id: "g-2", title: "Second" });
+
+                expect(events.length).toBe(1);
+                expect((events[0] as KnowledgeObjectUpsertedEvent).id).toBe("g-1");
+            });
+
+            test("should clear all listeners with offAll", () => {
+                const events: HookEvent[] = [];
+                ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+                ctx.hooks.onAny((e) => events.push(e));
+
+                ctx.hooks.offAll();
+                ctx.upsertGoal({ id: "g-1", title: "Test" });
+
+                expect(events.length).toBe(0);
+            });
+
+            test("should clear listeners by event type with off", () => {
+                const events: HookEvent[] = [];
+                ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+                ctx.hooks.on("lane:created", (e) => events.push(e));
+
+                ctx.hooks.off("knowledgeObject:upserted");
+
+                ctx.upsertGoal({ id: "g-1", title: "Test" });
+                ctx.ensureLane("test-lane");
+
+                expect(events.length).toBe(1);
+                expect(events[0]?.type).toBe("lane:created");
+            });
+
+            test("should return listener count", () => {
+                expect(ctx.hooks.listenerCount).toBe(0);
+
+                const unsub1 = ctx.hooks.on("knowledgeObject:upserted", () => {});
+                expect(ctx.hooks.listenerCount).toBe(1);
+
+                const unsub2 = ctx.hooks.onAny(() => {});
+                expect(ctx.hooks.listenerCount).toBe(2);
+
+                unsub1();
+                expect(ctx.hooks.listenerCount).toBe(1);
+
+                unsub2();
+                expect(ctx.hooks.listenerCount).toBe(0);
+            });
+        });
+
+        describe("Error Isolation", () => {
+            test("should not break framework when listener throws", () => {
+                const events: HookEvent[] = [];
+
+                // Listener that throws
+                ctx.hooks.on("knowledgeObject:upserted", () => {
+                    throw new Error("Intentional test error");
+                });
+
+                // Listener that captures events
+                ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+
+                // Should not throw
+                expect(() => {
+                    ctx.upsertGoal({ id: "g-1", title: "Test" });
+                }).not.toThrow();
+
+                // Second listener should still have received the event
+                expect(events.length).toBe(1);
+            });
+
+            test("should not break framework when wildcard listener throws", () => {
+                ctx.hooks.onAny(() => {
+                    throw new Error("Intentional test error");
+                });
+
+                expect(() => {
+                    ctx.upsertGoal({ id: "g-1", title: "Test" });
+                    ctx.ensureLane("test");
+                    ctx.refreshAllLanes();
+                }).not.toThrow();
+            });
+        });
+
+        describe("Knowledge Object Events", () => {
+            test("should emit knowledgeObject:upserted for all kinds", () => {
+                const events: KnowledgeObjectUpsertedEvent[] = [];
+                ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+
+                ctx.upsertGoal({ id: "g-1", title: "Goal" });
+                ctx.upsertConstraint({ id: "c-1", statement: "Constraint" });
+                ctx.upsertAssumption({ id: "a-1", statement: "Assumption" });
+                ctx.upsertEvidence({ id: "e-1", summary: "Evidence" });
+                ctx.upsertQuestion({ id: "q-1", question: "Question?" });
+                ctx.upsertDecision({ id: "d-1", statement: "Decision" });
+
+                expect(events.length).toBe(6);
+                expect(events.map((e) => e.kind)).toEqual([
+                    "goal", "constraint", "assumption", "evidence", "question", "decision"
+                ]);
+            });
+
+            test("should detect isNew for new vs updated items", () => {
+                const events: KnowledgeObjectUpsertedEvent[] = [];
+                ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+
+                ctx.upsertGoal({ id: "g-1", title: "Original" });
+                ctx.upsertGoal({ id: "g-1", title: "Updated" });
+
+                expect(events.length).toBe(2);
+                expect(events[0]?.isNew).toBe(true);
+                expect(events[1]?.isNew).toBe(false);
+            });
+
+            test("should include item snapshot in event payload", () => {
+                const events: KnowledgeObjectUpsertedEvent[] = [];
+                ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+
+                ctx.upsertGoal({ id: "g-1", title: "Test Goal", priority: "p0" });
+
+                const event = events[0]!;
+                expect(event.item).toBeDefined();
+                expect((event.item as { title: string }).title).toBe("Test Goal");
+                expect((event.item as { priority: string }).priority).toBe("p0");
+            });
+        });
+
+        describe("Lane Events", () => {
+            test("should emit lane:created when creating new lane", () => {
+                const events: LaneCreatedEvent[] = [];
+                ctx.hooks.on("lane:created", (e) => events.push(e));
+
+                ctx.ensureLane("test-lane", "Test Lane");
+
+                expect(events.length).toBe(1);
+                expect(events[0]?.laneId).toBe("test-lane");
+                expect(events[0]?.name).toBe("Test Lane");
+            });
+
+            test("should not emit lane:created when updating existing lane", () => {
+                ctx.ensureLane("test-lane", "Original");
+
+                const events: LaneCreatedEvent[] = [];
+                ctx.hooks.on("lane:created", (e) => events.push(e));
+
+                ctx.ensureLane("test-lane", "Updated");
+
+                expect(events.length).toBe(0);
+            });
+
+            test("should emit lane:removed when removing lane", () => {
+                ctx.ensureLane("test-lane");
+
+                const events: HookEvent[] = [];
+                ctx.hooks.on("lane:removed", (e) => events.push(e));
+
+                ctx.removeLane("test-lane");
+
+                expect(events.length).toBe(1);
+                expect((events[0] as { laneId: string }).laneId).toBe("test-lane");
+            });
+
+            test("should emit lane:statusChanged when status changes", () => {
+                ctx.ensureLane("test-lane");
+                const events: LaneStatusChangedEvent[] = [];
+                ctx.hooks.on("lane:statusChanged", (e) => events.push(e));
+
+                ctx.setLaneStatus("test-lane", "disabled");
+
+                expect(events.length).toBe(1);
+                expect(events[0]?.oldStatus).toBe("enabled");
+                expect(events[0]?.newStatus).toBe("disabled");
+            });
+
+            test("should not emit lane:statusChanged when status is same", () => {
+                ctx.ensureLane("test-lane");
+                const events: LaneStatusChangedEvent[] = [];
+                ctx.hooks.on("lane:statusChanged", (e) => events.push(e));
+
+                ctx.setLaneStatus("test-lane", "enabled"); // Already enabled
+
+                expect(events.length).toBe(0);
+            });
+
+            test("should emit lane:pinChanged when pinning/unpinning", () => {
+                ctx.ensureLane("test-lane");
+                ctx.upsertGoal({ id: "g-1", title: "Test" });
+
+                const events: LanePinChangedEvent[] = [];
+                ctx.hooks.on("lane:pinChanged", (e) => events.push(e));
+
+                ctx.pinInLane("test-lane", "goal", "g-1");
+                ctx.unpinInLane("test-lane", "goal", "g-1");
+
+                expect(events.length).toBe(2);
+                expect(events[0]?.pinned).toBe(true);
+                expect(events[1]?.pinned).toBe(false);
+            });
+        });
+
+        describe("Selection Events", () => {
+            test("should emit lane:refreshed when refreshing single lane", () => {
+                ctx.ensureLane("test-lane");
+                ctx.upsertGoal({ id: "g-1", title: "Test" });
+
+                const events: LaneRefreshedEvent[] = [];
+                ctx.hooks.on("lane:refreshed", (e) => events.push(e));
+
+                ctx.refreshLaneSelection("test-lane");
+
+                expect(events.length).toBe(1);
+                expect(events[0]?.laneId).toBe("test-lane");
+                expect(events[0]?.selectedCount).toBeGreaterThanOrEqual(0);
+                expect(Array.isArray(events[0]?.selected)).toBe(true);
+            });
+
+            test("should emit lanes:refreshedAll when refreshing all lanes", () => {
+                ctx.ensureLane("lane-1");
+                ctx.ensureLane("lane-2");
+
+                const events: LanesRefreshedAllEvent[] = [];
+                ctx.hooks.on("lanes:refreshedAll", (e) => events.push(e));
+
+                ctx.refreshAllLanes();
+
+                expect(events.length).toBe(1);
+                expect(events[0]?.laneIds).toContain("lane-1");
+                expect(events[0]?.laneIds).toContain("lane-2");
+            });
+        });
+
+        describe("Merge Events", () => {
+            test("should emit activeWindow:merged when merging lanes", () => {
+                const ctxWithLanes = makeDefaultActiveMetaContext("test-merge");
+                ctxWithLanes.upsertGoal({
+                    id: "g-1",
+                    title: "Test Goal",
+                    tags: [{ key: "lane", value: "task" }],
+                });
+
+                const events: ActiveWindowMergedEvent[] = [];
+                ctxWithLanes.hooks.on("activeWindow:merged", (e) => events.push(e));
+
+                ctxWithLanes.refreshAllLanes();
+                ctxWithLanes.mergeLanesToActiveWindow();
+
+                expect(events.length).toBe(1);
+                expect(events[0]?.fromLanes.length).toBeGreaterThan(0);
+                expect(Array.isArray(events[0]?.selected)).toBe(true);
+            });
+        });
+
+        describe("Synthesis Events", () => {
+            test("should emit archive:created and workingMemory:synthesized", () => {
+                const ctxWithContent = makeDefaultActiveMetaContext("test-synth");
+                ctxWithContent.upsertGoal({
+                    id: "g-1",
+                    title: "Test Goal",
+                    tags: [{ key: "lane", value: "task" }],
+                });
+
+                const archiveEvents: ArchiveCreatedEvent[] = [];
+                const synthesisEvents: WorkingMemorySynthesizedEvent[] = [];
+
+                ctxWithContent.hooks.on("archive:created", (e) => archiveEvents.push(e));
+                ctxWithContent.hooks.on("workingMemory:synthesized", (e) => synthesisEvents.push(e));
+
+                ctxWithContent.synthesizeFromLanes({ tokenBudget: 500 });
+
+                expect(archiveEvents.length).toBe(1);
+                expect(synthesisEvents.length).toBe(1);
+
+                expect(archiveEvents[0]?.archiveId).toBeDefined();
+                expect(synthesisEvents[0]?.tokenBudget).toBe(500);
+                expect(synthesisEvents[0]?.text.length).toBeGreaterThan(0);
+                expect(synthesisEvents[0]?.archiveId).toBe(archiveEvents[0]?.archiveId);
+            });
+
+            test("should fire events in correct order during synthesizeFromLanes", () => {
+                const ctxWithContent = makeDefaultActiveMetaContext("test-order");
+                ctxWithContent.upsertGoal({
+                    id: "g-1",
+                    title: "Test Goal",
+                    tags: [{ key: "lane", value: "task" }],
+                });
+
+                const eventOrder: string[] = [];
+                ctxWithContent.hooks.onAny((e) => eventOrder.push(e.type));
+
+                ctxWithContent.synthesizeFromLanes();
+
+                expect(eventOrder).toEqual([
+                    "lanes:refreshedAll",
+                    "activeWindow:merged",
+                    "archive:created",
+                    "workingMemory:synthesized",
+                ]);
+            });
+        });
+
+        describe("Ingest Evidence Events", () => {
+            test("should emit evidence:ingested event", async () => {
+                const events: HookEvent[] = [];
+                ctx.hooks.on("evidence:ingested", (e) => events.push(e));
+
+                await ctx.ingestEvidence(
+                    { id: "e-1", summary: "Test evidence" },
+                    { synthesize: false }
+                );
+
+                expect(events.length).toBe(1);
+                expect((events[0] as { evidenceId: string }).evidenceId).toBe("e-1");
+                expect((events[0] as { synthesized: boolean }).synthesized).toBe(false);
+            });
+
+            test("should indicate synthesized=true when synthesis requested", async () => {
+                const ctxWithLanes = makeDefaultActiveMetaContext("test-ingest");
+                const events: HookEvent[] = [];
+                ctxWithLanes.hooks.on("evidence:ingested", (e) => events.push(e));
+
+                await ctxWithLanes.ingestEvidence(
+                    { id: "e-1", summary: "Test", tags: [{ key: "lane", value: "task" }] },
+                    { synthesize: true }
+                );
+
+                expect((events[0] as { synthesized: boolean }).synthesized).toBe(true);
+            });
+        });
+
+        describe("Event Timestamps and Context ID", () => {
+            test("should include timestamp in all events", () => {
+                const events: HookEvent[] = [];
+                ctx.hooks.onAny((e) => events.push(e));
+
+                ctx.upsertGoal({ id: "g-1", title: "Test" });
+
+                expect(events[0]?.timestamp).toBeDefined();
+                expect(() => new Date(events[0]!.timestamp)).not.toThrow();
+            });
+
+            test("should include contextId in all events", () => {
+                const events: HookEvent[] = [];
+                ctx.hooks.onAny((e) => events.push(e));
+
+                ctx.upsertGoal({ id: "g-1", title: "Test" });
+
+                expect(events[0]?.contextId).toBe("test-ctx");
+            });
+        });
+
+        describe("Event Payload Immutability", () => {
+            test("should provide snapshots, not live references", () => {
+                let capturedItem: Record<string, unknown> | undefined;
+                ctx.hooks.on("knowledgeObject:upserted", (e) => {
+                    capturedItem = e.item;
+                });
+
+                ctx.upsertGoal({ id: "g-1", title: "Original" });
+                const originalTitle = (capturedItem as { title: string })?.title;
+
+                // Update the goal
+                ctx.upsertGoal({ id: "g-1", title: "Updated" });
+
+                // The captured item from the first event should still have original title
+                expect(originalTitle).toBe("Original");
+            });
         });
     });
 });

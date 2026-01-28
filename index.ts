@@ -12,12 +12,133 @@ export { types, type Instance, type SnapshotIn } from "mobx-state-tree";
  *  2) Token-budgeted synthesizer
  *     - Builds a condensed Working Memory note (string) within a token budget proxy
  *     - Archives the raw selected items into an ArchiveEntry (plus snapshot)
+ *  3) Lifecycle hooks system
+ *     - Reactive event emitters for observing framework state changes
+ *     - After-only, non-blocking, composable hooks
  *
  * Notes:
  * - "Token budgeting" here is a proxy via character budget; you can swap in a real tokenizer.
  * - All domain objects (goals/constraints/assumptions/evidence/questions/decisions) are global,
  *   and lanes reference them via refs.
  */
+
+/** ---------- Hook Types ---------- */
+
+export type KnowledgeObjectKind = "goal" | "constraint" | "assumption" | "evidence" | "question" | "decision";
+
+export interface HookEventBase {
+    type: string;
+    timestamp: string;
+    contextId: string;
+}
+
+export interface KnowledgeObjectUpsertedEvent extends HookEventBase {
+    type: "knowledgeObject:upserted";
+    kind: KnowledgeObjectKind;
+    id: string;
+    item: Record<string, unknown>;
+    isNew: boolean;
+}
+
+export interface LaneCreatedEvent extends HookEventBase {
+    type: "lane:created";
+    laneId: string;
+    name: string;
+}
+
+export interface LaneRemovedEvent extends HookEventBase {
+    type: "lane:removed";
+    laneId: string;
+}
+
+export interface LaneStatusChangedEvent extends HookEventBase {
+    type: "lane:statusChanged";
+    laneId: string;
+    oldStatus: "enabled" | "muted" | "disabled";
+    newStatus: "enabled" | "muted" | "disabled";
+}
+
+export interface LanePinChangedEvent extends HookEventBase {
+    type: "lane:pinChanged";
+    laneId: string;
+    kind: KnowledgeObjectKind;
+    itemId: string;
+    pinned: boolean;
+}
+
+export interface LaneRefreshedEvent extends HookEventBase {
+    type: "lane:refreshed";
+    laneId: string;
+    selectedCount: number;
+    selected: Array<{ kind: string; id: string; score: number; pinned: boolean }>;
+}
+
+export interface LanesRefreshedAllEvent extends HookEventBase {
+    type: "lanes:refreshedAll";
+    laneIds: string[];
+    totalSelected: number;
+}
+
+export interface ActiveWindowMergedEvent extends HookEventBase {
+    type: "activeWindow:merged";
+    mergedCount: number;
+    fromLanes: string[];
+    selected: Array<{ kind: string; id: string; score: number; pinned: boolean }>;
+}
+
+export interface WorkingMemorySynthesizedEvent extends HookEventBase {
+    type: "workingMemory:synthesized";
+    tokenBudget: number;
+    actualTokens: number;
+    text: string;
+    archiveId: string;
+}
+
+export interface ArchiveCreatedEvent extends HookEventBase {
+    type: "archive:created";
+    archiveId: string;
+    mergedCount: number;
+}
+
+export interface EvidenceIngestedEvent extends HookEventBase {
+    type: "evidence:ingested";
+    evidenceId: string;
+    synthesized: boolean;
+}
+
+export type HookEvent =
+    | KnowledgeObjectUpsertedEvent
+    | LaneCreatedEvent
+    | LaneRemovedEvent
+    | LaneStatusChangedEvent
+    | LanePinChangedEvent
+    | LaneRefreshedEvent
+    | LanesRefreshedAllEvent
+    | ActiveWindowMergedEvent
+    | WorkingMemorySynthesizedEvent
+    | ArchiveCreatedEvent
+    | EvidenceIngestedEvent;
+
+export type HookEventType = HookEvent["type"];
+
+/** Type map for inferring specific event types from string literals */
+export interface HookEventMap {
+    "knowledgeObject:upserted": KnowledgeObjectUpsertedEvent;
+    "lane:created": LaneCreatedEvent;
+    "lane:removed": LaneRemovedEvent;
+    "lane:statusChanged": LaneStatusChangedEvent;
+    "lane:pinChanged": LanePinChangedEvent;
+    "lane:refreshed": LaneRefreshedEvent;
+    "lanes:refreshedAll": LanesRefreshedAllEvent;
+    "activeWindow:merged": ActiveWindowMergedEvent;
+    "workingMemory:synthesized": WorkingMemorySynthesizedEvent;
+    "archive:created": ArchiveCreatedEvent;
+    "evidence:ingested": EvidenceIngestedEvent;
+}
+
+export type HookListener<T extends HookEvent = HookEvent> = (event: T) => void;
+
+export type Unsubscribe = () => void;
 
 /** ---------- Primitives ---------- */
 
@@ -204,6 +325,97 @@ const SelectionPolicy = types.model("SelectionPolicy", {
     ]),
 });
 
+/** ---------- Hook Registry ---------- */
+
+const HookRegistry = types
+    .model("HookRegistry", {})
+    .volatile(() => ({
+        listeners: new Map<string, Set<HookListener<HookEvent>>>(),
+        wildcardListeners: new Set<HookListener<HookEvent>>(),
+    }))
+    .views((self) => ({
+        get listenerCount(): number {
+            let count = self.wildcardListeners.size;
+            for (const set of self.listeners.values()) {
+                count += set.size;
+            }
+            return count;
+        },
+    }))
+    .actions((self) => ({
+        on<K extends keyof HookEventMap>(
+            eventType: K,
+            listener: HookListener<HookEventMap[K]>
+        ): Unsubscribe {
+            if (!self.listeners.has(eventType)) {
+                self.listeners.set(eventType, new Set());
+            }
+            const typedListener = listener as HookListener<HookEvent>;
+            self.listeners.get(eventType)!.add(typedListener);
+
+            return () => {
+                const set = self.listeners.get(eventType);
+                if (set) {
+                    set.delete(typedListener);
+                    if (set.size === 0) {
+                        self.listeners.delete(eventType);
+                    }
+                }
+            };
+        },
+
+        onAny(listener: HookListener<HookEvent>): Unsubscribe {
+            self.wildcardListeners.add(listener);
+            return () => {
+                self.wildcardListeners.delete(listener);
+            };
+        },
+
+        once<K extends keyof HookEventMap>(
+            eventType: K,
+            listener: HookListener<HookEventMap[K]>
+        ): Unsubscribe {
+            const wrappedListener: HookListener<HookEventMap[K]> = (event) => {
+                unsub();
+                listener(event);
+            };
+            const unsub = this.on(eventType, wrappedListener);
+            return unsub;
+        },
+
+        off(eventType: HookEventType): void {
+            self.listeners.delete(eventType);
+        },
+
+        offAll(): void {
+            self.listeners.clear();
+            self.wildcardListeners.clear();
+        },
+
+        _emit(event: HookEvent): void {
+            // Fire type-specific listeners
+            const typeListeners = self.listeners.get(event.type);
+            if (typeListeners) {
+                for (const listener of typeListeners) {
+                    try {
+                        listener(event);
+                    } catch (e) {
+                        console.error(`[HookRegistry] Error in listener for ${event.type}:`, e);
+                    }
+                }
+            }
+
+            // Fire wildcard listeners
+            for (const listener of self.wildcardListeners) {
+                try {
+                    listener(event);
+                } catch (e) {
+                    console.error(`[HookRegistry] Error in wildcard listener for ${event.type}:`, e);
+                }
+            }
+        },
+    }));
+
 const ContextWindow = types
     .model("ContextWindow", {
         policy: types.optional(SelectionPolicy, {}),
@@ -314,6 +526,9 @@ export const ActiveMetaContext = types
 
         // Archive log
         archive: types.optional(types.array(ArchiveEntry), []),
+
+        // Lifecycle hooks registry
+        hooks: types.optional(HookRegistry, {}),
 
         createdAt: types.optional(ISODateString, () => new Date().toISOString()),
         updatedAt: types.optional(ISODateString, () => new Date().toISOString()),
@@ -465,12 +680,45 @@ export const ActiveMetaContext = types
             self.updatedAt = new Date().toISOString();
         };
 
+        type HookEventWithoutMeta<T extends HookEvent> = Omit<T, "timestamp" | "contextId">;
+        type AnyHookEventWithoutMeta =
+            | HookEventWithoutMeta<KnowledgeObjectUpsertedEvent>
+            | HookEventWithoutMeta<LaneCreatedEvent>
+            | HookEventWithoutMeta<LaneRemovedEvent>
+            | HookEventWithoutMeta<LaneStatusChangedEvent>
+            | HookEventWithoutMeta<LanePinChangedEvent>
+            | HookEventWithoutMeta<LaneRefreshedEvent>
+            | HookEventWithoutMeta<LanesRefreshedAllEvent>
+            | HookEventWithoutMeta<ActiveWindowMergedEvent>
+            | HookEventWithoutMeta<WorkingMemorySynthesizedEvent>
+            | HookEventWithoutMeta<ArchiveCreatedEvent>
+            | HookEventWithoutMeta<EvidenceIngestedEvent>;
+
+        const emitEvent = (event: AnyHookEventWithoutMeta) => {
+            self.hooks._emit({
+                ...event,
+                timestamp: new Date().toISOString(),
+                contextId: self.id,
+            } as HookEvent);
+        };
+
         const upsertMapItem = <T extends { id: string }>(
-            map: { set: (key: string, value: T) => void },
-            item: T
+            map: { set: (key: string, value: T) => void; has: (key: string) => boolean; get: (key: string) => T | undefined },
+            item: T,
+            kind: KnowledgeObjectKind
         ) => {
+            const isNew = !map.has(item.id);
             map.set(item.id, item);
             touch();
+            // Emit after state change
+            const storedItem = map.get(item.id);
+            emitEvent({
+                type: "knowledgeObject:upserted",
+                kind,
+                id: item.id,
+                item: storedItem ? { ...getSnapshot(storedItem as never) } : { ...item },
+                isNew,
+            });
         };
 
         const buildCandidatesForLane = (lane: Instance<typeof ContextLane>) => {
@@ -619,63 +867,142 @@ export const ActiveMetaContext = types
                 touch();
             },
             upsertGoal(goal: SnapshotIn<typeof Goal>) {
-                upsertMapItem(self.goals, goal);
+                upsertMapItem(self.goals, goal, "goal");
             },
             upsertConstraint(c: SnapshotIn<typeof Constraint>) {
-                upsertMapItem(self.constraints, c);
+                upsertMapItem(self.constraints, c, "constraint");
             },
             upsertAssumption(a: SnapshotIn<typeof Assumption>) {
-                upsertMapItem(self.assumptions, a);
+                upsertMapItem(self.assumptions, a, "assumption");
             },
             upsertEvidence(e: SnapshotIn<typeof Evidence>) {
-                upsertMapItem(self.evidence, e);
+                upsertMapItem(self.evidence, e, "evidence");
             },
             upsertQuestion(q: SnapshotIn<typeof OpenQuestion>) {
-                upsertMapItem(self.questions, q);
+                upsertMapItem(self.questions, q, "question");
             },
             upsertDecision(d: SnapshotIn<typeof Decision>) {
-                upsertMapItem(self.decisions, d);
+                upsertMapItem(self.decisions, d, "decision");
             },
 
             /** ---- Lanes ---- */
             ensureLane(id: string, name?: string) {
-                if (!self.lanes.has(id)) {
+                const isNew = !self.lanes.has(id);
+                if (isNew) {
                     self.lanes.set(id, { id, name: name ?? id });
                 } else if (name) {
                     self.lanes.get(id)!.setName(name);
                 }
                 touch();
+                if (isNew) {
+                    emitEvent({
+                        type: "lane:created",
+                        laneId: id,
+                        name: name ?? id,
+                    });
+                }
             },
 
             removeLane(id: string) {
+                const existed = self.lanes.has(id);
                 self.lanes.delete(id);
                 touch();
+                if (existed) {
+                    emitEvent({
+                        type: "lane:removed",
+                        laneId: id,
+                    });
+                }
+            },
+
+            /** ---- Lane Status & Pin (with hooks) ---- */
+            setLaneStatus(laneId: string, newStatus: "enabled" | "muted" | "disabled") {
+                const lane = self.lanes.get(laneId);
+                if (!lane) return;
+                const oldStatus = lane.status;
+                if (oldStatus === newStatus) return;
+                lane.setStatus(newStatus);
+                touch();
+                emitEvent({
+                    type: "lane:statusChanged",
+                    laneId,
+                    oldStatus,
+                    newStatus,
+                });
+            },
+
+            pinInLane(laneId: string, kind: KnowledgeObjectKind, itemId: string) {
+                const lane = self.lanes.get(laneId);
+                if (!lane) return;
+                lane.pin(kind, itemId);
+                touch();
+                emitEvent({
+                    type: "lane:pinChanged",
+                    laneId,
+                    kind,
+                    itemId,
+                    pinned: true,
+                });
+            },
+
+            unpinInLane(laneId: string, kind: KnowledgeObjectKind, itemId: string) {
+                const lane = self.lanes.get(laneId);
+                if (!lane) return;
+                lane.unpin(kind, itemId);
+                touch();
+                emitEvent({
+                    type: "lane:pinChanged",
+                    laneId,
+                    kind,
+                    itemId,
+                    pinned: false,
+                });
             },
 
             /** ---- Lane Refresh ---- */
             refreshLaneSelection(laneId: string) {
                 const lane = self.lanes.get(laneId);
                 if (!lane) return;
+                let selected: SnapshotIn<typeof ContextItemRef>[] = [];
                 if (lane.status !== "enabled") {
                     lane.window.setSelected([]);
-                    touch();
-                    return;
+                } else {
+                    selected = buildCandidatesForLane(lane);
+                    lane.window.setSelected(selected);
                 }
-                const selected = buildCandidatesForLane(lane);
-                lane.window.setSelected(selected);
                 touch();
+                emitEvent({
+                    type: "lane:refreshed",
+                    laneId,
+                    selectedCount: selected.length,
+                    selected: selected.map((s) => ({
+                        kind: s.kind as string,
+                        id: s.id as string,
+                        score: s.score ?? 0,
+                        pinned: s.pinned ?? false,
+                    })),
+                });
             },
 
             refreshAllLanes() {
+                const laneIds: string[] = [];
+                let totalSelected = 0;
                 for (const lane of self.lanes.values()) {
+                    laneIds.push(lane.id);
                     if (lane.status !== "enabled") {
                         lane.window.setSelected([]);
                         continue;
                     }
                     const selected = buildCandidatesForLane(lane);
                     lane.window.setSelected(selected);
+                    totalSelected += selected.length;
                 }
                 touch();
+                emitEvent({
+                    type: "lanes:refreshedAll",
+                    laneIds,
+                    totalSelected,
+                });
             },
 
             /**
@@ -707,6 +1034,17 @@ export const ActiveMetaContext = types
 
                 self.activeWindow.setSelected(capped);
                 touch();
+                emitEvent({
+                    type: "activeWindow:merged",
+                    mergedCount: capped.length,
+                    fromLanes: enabled.map((l) => l.id),
+                    selected: capped.map((s) => ({
+                        kind: s.kind as string,
+                        id: s.id as string,
+                        score: s.score ?? 0,
+                        pinned: s.pinned ?? false,
+                    })),
+                });
             },
 
             /**
@@ -737,6 +1075,23 @@ export const ActiveMetaContext = types
                 }
 
                 touch();
+
+                // Emit archive:created event
+                emitEvent({
+                    type: "archive:created",
+                    archiveId,
+                    mergedCount: selected.length,
+                });
+
+                // Emit workingMemory:synthesized event
+                const actualTokens = approxTokens(wm);
+                emitEvent({
+                    type: "workingMemory:synthesized",
+                    tokenBudget,
+                    actualTokens,
+                    text: wm,
+                    archiveId,
+                });
             },
 
             /**
@@ -803,7 +1158,7 @@ export const ActiveMetaContext = types
                 e: SnapshotIn<typeof Evidence>,
                 opts?: { synthesize?: boolean; tokenBudget?: number }
             ) {
-                upsertMapItem(self.evidence, e);
+                upsertMapItem(self.evidence, e, "evidence");
 
                 // Call synchronous actions directly in the flow
                 // Type assertion needed to access sibling actions within a flow
@@ -814,21 +1169,30 @@ export const ActiveMetaContext = types
                 };
                 const actions = self as SelfWithActions;
 
-                if (opts?.synthesize) {
+                const didSynthesize = opts?.synthesize ?? false;
+                if (didSynthesize) {
                     actions.refreshAllLanes();
                     actions.mergeLanesToActiveWindow();
-                    actions.synthesizeWorkingMemory({ tokenBudget: opts.tokenBudget });
+                    actions.synthesizeWorkingMemory({ tokenBudget: opts?.tokenBudget });
                 } else {
                     // minimal: keep activeWindow fresh if you want
                     actions.refreshAllLanes();
                     actions.mergeLanesToActiveWindow();
                 }
+
+                // Emit evidence:ingested event
+                emitEvent({
+                    type: "evidence:ingested",
+                    evidenceId: e.id,
+                    synthesized: didSynthesize,
+                });
             }),
         };
     });
 
 /** ---------- Types ---------- */
 export type ActiveMetaContextInstance = Instance<typeof ActiveMetaContext>;
+export type HookRegistryInstance = Instance<typeof HookRegistry>;
 
 /** ---------- Suggested defaults helper (optional) ---------- */
 export function makeDefaultActiveMetaContext(id: string) {
