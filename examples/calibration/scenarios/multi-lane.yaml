@@ -1,0 +1,76 @@
+metaContext:
+  id: scenario-multi-lane
+
+lanes:
+  - id: task
+    name: Task Lane
+  - id: legal
+    name: Legal Lane
+
+goals:
+  - id: g1
+    title: Ship GDPR compliance module
+    priority: p0
+    tags:
+      - key: lane
+        value: task
+  - id: g2
+    title: Pass legal audit by Q3
+    priority: p1
+    tags:
+      - key: lane
+        value: legal
+
+constraints:
+  - id: c1
+    statement: PII must be encrypted at rest
+    priority: p0
+    tags:
+      - key: lane
+        value: legal
+
+assumptions:
+  - id: a1
+    statement: Users consent to cookie tracking via banner
+    confidence: medium
+    tags:
+      - key: lane
+        value: legal
+
+evidence:
+  - id: e1
+    summary: Audit found unencrypted PII in logs
+    severity: critical
+    confidence: high
+    tags:
+      - key: lane
+        value: legal
+  - id: e2
+    summary: Feature flag rollout at 40% with no regressions
+    severity: low
+    confidence: high
+    tags:
+      - key: lane
+        value: task
+
+questions:
+  - id: q1
+    question: Do we need a DPO appointment for this scope?
+    priority: p1
+    tags:
+      - key: lane
+        value: legal
+
+decisions:
+  - id: d1
+    statement: Adopt field-level encryption for PII columns
+    rationale: Meets GDPR Art. 32 requirement with minimal perf impact
+    tags:
+      - key: lane
+        value: legal
+  - id: d2
+    statement: Use phased rollout for compliance module
+    rationale: Reduces risk of breaking changes
+    tags:
+      - key: lane
+        value: task

@@ -78,4 +78,51 @@ key: value
     const result = yamlToJson("a: 1");
     expect(result).toBe('{\n  "a": 1\n}');
   });
+
+  test("array of objects", () => {
+    const yaml = `
+goals:
+  - id: g1
+    title: Ship feature
+  - id: g2
+    title: Fix bug
+`;
+    expect(parse(yaml)).toEqual({
+      goals: [
+        { id: "g1", title: "Ship feature" },
+        { id: "g2", title: "Fix bug" },
+      ],
+    });
+  });
+
+  test("array of objects with nested arrays", () => {
+    const yaml = `
+evidence:
+  - id: e1
+    summary: Found issue
+    tags:
+      - lane
+      - security
+`;
+    expect(parse(yaml)).toEqual({
+      evidence: [
+        { id: "e1", summary: "Found issue", tags: ["lane", "security"] },
+      ],
+    });
+  });
+
+  test("array of objects with nested objects", () => {
+    const yaml = `
+lanes:
+  - id: task
+    config:
+      maxItems: 20
+      enabled: true
+`;
+    expect(parse(yaml)).toEqual({
+      lanes: [
+        { id: "task", config: { maxItems: 20, enabled: true } },
+      ],
+    });
+  });
 });

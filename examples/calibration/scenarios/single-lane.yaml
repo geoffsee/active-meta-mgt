@@ -1,0 +1,39 @@
+metaContext:
+  id: scenario-single-lane
+
+lanes:
+  - id: task
+    name: Task Lane
+
+goals:
+  - id: g1
+    title: Deliver MVP by end of sprint
+    priority: p0
+    tags:
+      - key: lane
+        value: task
+
+constraints:
+  - id: c1
+    statement: No external API calls in the hot path
+    priority: p1
+    tags:
+      - key: lane
+        value: task
+
+evidence:
+  - id: e1
+    summary: Latency p99 exceeds 200ms under load
+    severity: high
+    confidence: high
+    tags:
+      - key: lane
+        value: task
+
+decisions:
+  - id: d1
+    statement: Use in-memory cache instead of Redis
+    rationale: Reduces network round-trips for hot-path lookups
+    tags:
+      - key: lane
+        value: task

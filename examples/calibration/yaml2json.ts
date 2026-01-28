@@ -37,7 +37,8 @@ export function yamlToJson(yaml: string): string {
         return val;
     };
 
-    for (const line of lines) {
+    for (let li = 0; li < lines.length; li++) {
+        const line = lines[li]!;
         const indent = line.match(/^ */)![0].length;
         const trimmed = line.trim();
 
@@ -48,11 +49,36 @@ export function yamlToJson(yaml: string): string {
         const parent = stack[stack.length - 1]!.value;
 
         if (trimmed.startsWith("- ")) {
-            const val = parseScalar(trimmed.slice(2));
             if (!Array.isArray(parent)) {
                 throw new Error("Invalid YAML: array item without array parent");
             }
-            parent.push(val);
+            const itemContent = trimmed.slice(2);
+            const colonIdx = itemContent.indexOf(":");
+            if (colonIdx === -1 || itemContent.startsWith('"') || itemContent.startsWith("'")) {
+                // Simple scalar array item
+                parent.push(parseScalar(itemContent));
+                continue;
+            }
+            // Array item that opens an object: `- key: value`
+            const itemKey = itemContent.slice(0, colonIdx);
+            const itemRawValue = itemContent.slice(colonIdx + 1).trim();
+            const obj: Record<string, unknown> = {};
+            // The virtual indent for properties of this object is the column after "- "
+            const objIndent = indent + 2;
+            if (itemRawValue === "") {
+                // `- key:` with nested content below
+                const nextLine = lines[li + 1] ?? "";
+                const nextIsArray = nextLine.startsWith(" ".repeat(objIndent + 2) + "- ");
+                const child: Record<string, unknown> | unknown[] = nextIsArray ? [] : {};
+                obj[itemKey] = child;
+                parent.push(obj);
+                stack.push({ indent: indent + 1, value: obj });
+                stack.push({ indent: objIndent, value: child });
+            } else {
+                obj[itemKey] = parseScalar(itemRawValue);
+                parent.push(obj);
+                stack.push({ indent: indent + 1, value: obj });
+            }
             continue;
         }
 
@@ -61,9 +87,8 @@ export function yamlToJson(yaml: string): string {
 
         if (rawValue === "") {
             // nested object or array
-            const nextIsArray = lines.some((l: string) =>
-                l.startsWith(" ".repeat(indent + 2) + "- ")
-            );
+            const nextLine = lines[li + 1] ?? "";
+            const nextIsArray = nextLine.startsWith(" ".repeat(indent + 2) + "- ");
 
             const child: Record<string, unknown> | unknown[] = nextIsArray ? [] : {};
             (parent as Record<string, unknown>)[key] = child;
