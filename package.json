@@ -1,6 +1,6 @@
 {
   "name": "active-meta-mgt",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Token-budgeted context management framework with MobX-State-Tree for organizing knowledge objects across multiple context lanes",
   "author": "Geoff Seemueller",
   "license": "MIT",

@@ -1,4 +1,5 @@
 node_modules
 dist
 bun.lock
-examples
+examples/vitalsWatch/client
+examples/vitalsWatch/data

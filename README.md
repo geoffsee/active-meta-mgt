@@ -26,7 +26,7 @@ ctx.upsertGoal({
   id: "goal-1",
   title: "Complete feature X",
   tags: [{ key: "lane", value: "task" }],
-  priority: "p0"
+  priority: "p0",
 });
 
 ctx.upsertEvidence({
@@ -34,14 +34,14 @@ ctx.upsertEvidence({
   summary: "User feedback indicates performance regression",
   tags: [{ key: "lane", value: "task" }],
   severity: "high",
-  confidence: "high"
+  confidence: "high",
 });
 
 ctx.upsertConstraint({
   id: "con-1",
   statement: "Must maintain backward compatibility",
   tags: [{ key: "lane", value: "implementation" }],
-  priority: "p0"
+  priority: "p0",
 });
 
 // 3. Synthesize working memory from all lanes
@@ -58,14 +58,14 @@ console.log(payload.workingMemory.text);
 
 Six types of domain entities stored globally:
 
-| Type | Purpose | Key Fields |
-|------|---------|------------|
-| **Goal** | Objectives and targets | `title`, `priority` (p0-p3), `status` |
-| **Constraint** | Requirements and limitations | `statement`, `priority`, `status` |
-| **Assumption** | Beliefs and hypotheses | `statement`, `confidence` (low/medium/high), `status` |
-| **Evidence** | Facts and findings | `summary`, `detail`, `severity`, `confidence` |
-| **OpenQuestion** | Unanswered questions | `question`, `priority`, `status` |
-| **Decision** | Choices with rationale | `statement`, `rationale`, `status` |
+| Type             | Purpose                      | Key Fields                                            |
+| ---------------- | ---------------------------- | ----------------------------------------------------- |
+| **Goal**         | Objectives and targets       | `title`, `priority` (p0-p3), `status`                 |
+| **Constraint**   | Requirements and limitations | `statement`, `priority`, `status`                     |
+| **Assumption**   | Beliefs and hypotheses       | `statement`, `confidence` (low/medium/high), `status` |
+| **Evidence**     | Facts and findings           | `summary`, `detail`, `severity`, `confidence`         |
+| **OpenQuestion** | Unanswered questions         | `question`, `priority`, `status`                      |
+| **Decision**     | Choices with rationale       | `statement`, `rationale`, `status`                    |
 
 All objects support `tags` for lane filtering, `provenance` for source tracking, and timestamps for recency scoring.
 
@@ -141,6 +141,7 @@ ctx.hooks.offAll();
 ```
 
 Available events:
+
 - `knowledgeObject:upserted` - Item created or updated
 - `lane:created`, `lane:removed`, `lane:statusChanged`, `lane:pinChanged` - Lane lifecycle
 - `lane:refreshed`, `lanes:refreshedAll` - Selection refresh
@@ -196,8 +197,8 @@ const payload = ctx.buildLLMContextPayload();
 ```typescript
 import { countTokens, countTokensSync } from "active-meta-mgt/tokenizer";
 
-const tokens = await countTokens("text");      // Async BERT tokenization
-const approx = countTokensSync("text");        // Sync approximation (chars / 4)
+const tokens = await countTokens("text"); // Async BERT tokenization
+const approx = countTokensSync("text"); // Sync approximation (chars / 4)
 ```
 
 ## Archive System
