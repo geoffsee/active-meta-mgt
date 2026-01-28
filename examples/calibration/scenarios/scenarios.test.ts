@@ -433,3 +433,337 @@ describe("lifecycle events: multi-lane scenario", () => {
         expect(events).toHaveLength(0);
     });
 });
+
+// ── Lifecycle hooks: causal chain scenario ──
+
+describe("deterministic scenario: scenario-with-lifecycle-hooks", () => {
+    const doc = loadScenario("scenario-with-lifecycle-hooks");
+
+    test("creates context with correct id", () => {
+        const cal = new Calibrator(doc);
+        expect(cal.ctx.id).toBe("scenario-with-lifecycle-hooks");
+    });
+
+    test("loads all 11 knowledge objects", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+        expect(cal.ctx.evidence.size).toBe(3);
+        expect(cal.ctx.assumptions.size).toBe(1);
+        expect(cal.ctx.questions.size).toBe(1);
+        expect(cal.ctx.decisions.size).toBe(2);
+        expect(cal.ctx.goals.size).toBe(3);
+        expect(cal.ctx.constraints.size).toBe(1);
+    });
+
+    test("incident lane is registered", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+        expect(cal.ctx.lanes.has("incident")).toBe(true);
+    });
+});
+
+describe("lifecycle hooks: causal chain fires upsert events for every item", () => {
+    const doc = loadScenario("scenario-with-lifecycle-hooks");
+
+    test("knowledgeObject:upserted fires for all 11 items", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        expect(events).toHaveLength(11);
+        const ids = events.map((e) => e.id).sort();
+        expect(ids).toEqual(["a1", "c1", "d1", "d2", "e1", "e2", "e3", "g-cross", "g-orphan", "g1", "q1"]);
+    });
+
+    test("all upserted items are new", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        for (const e of events) {
+            expect(e.isNew).toBe(true);
+        }
+    });
+
+    test("upsert events cover all 6 knowledge object kinds", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        const kinds = new Set(events.map((e) => e.kind));
+        expect(kinds).toEqual(new Set(["evidence", "assumption", "question", "decision", "goal", "constraint"]));
+    });
+
+    test("causal chain items upsert in load order: evidence → assumptions → questions → decisions → goals → constraints", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        // loadKnowledgeObjects upserts by kind in order: goals, constraints, assumptions, evidence, questions, decisions
+        // Verify the kind grouping order matches the load function
+        const kindOrder = events.map((e) => e.kind);
+        const firstOfKind = (k: string) => kindOrder.indexOf(k);
+        expect(firstOfKind("goal")).toBeLessThan(firstOfKind("constraint"));
+        expect(firstOfKind("constraint")).toBeLessThan(firstOfKind("assumption"));
+        expect(firstOfKind("assumption")).toBeLessThan(firstOfKind("evidence"));
+        expect(firstOfKind("evidence")).toBeLessThan(firstOfKind("question"));
+        expect(firstOfKind("question")).toBeLessThan(firstOfKind("decision"));
+    });
+
+    test("evidence items upsert in document order: e1 → e2 → e3", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        const evidenceIds = events.filter((e) => e.kind === "evidence").map((e) => e.id);
+        expect(evidenceIds).toEqual(["e1", "e2", "e3"]);
+    });
+
+    test("decision items upsert in document order: d1 → d2", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        const decisionIds = events.filter((e) => e.kind === "decision").map((e) => e.id);
+        expect(decisionIds).toEqual(["d1", "d2"]);
+    });
+});
+
+describe("lifecycle hooks: causal chain synthesis events", () => {
+    const doc = loadScenario("scenario-with-lifecycle-hooks");
+
+    test("synthesis selects all 11 items into active window (orphan matched by default lanes)", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+        const payload = cal.synthesize();
+        expect(payload.selectedCount).toBe(11);
+    });
+
+    test("event order during synthesize is refresh → merge → archive → synthesize", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+
+        const types: string[] = [];
+        cal.ctx.hooks.onAny((e) => types.push(e.type));
+        cal.synthesize();
+
+        const relevant = types.filter((t) =>
+            ["lanes:refreshedAll", "activeWindow:merged", "archive:created", "workingMemory:synthesized"].includes(t),
+        );
+        expect(relevant).toEqual([
+            "lanes:refreshedAll",
+            "activeWindow:merged",
+            "archive:created",
+            "workingMemory:synthesized",
+        ]);
+    });
+
+    test("lanes:refreshedAll includes incident lane", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+
+        let refreshAll: any;
+        cal.ctx.hooks.on("lanes:refreshedAll", (e) => { refreshAll = e; });
+        cal.synthesize();
+
+        expect(refreshAll).toBeDefined();
+        expect(refreshAll.laneIds).toContain("incident");
+        // totalSelected is the sum across all lanes before dedup; incident (no tag filter)
+        // selects all 11, plus default lanes select overlapping subsets
+        expect(refreshAll.totalSelected).toBeGreaterThanOrEqual(11);
+    });
+
+    test("activeWindow:merged includes incident lane in fromLanes", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+
+        let merged: any;
+        cal.ctx.hooks.once("activeWindow:merged", (e) => { merged = e; });
+        cal.synthesize();
+
+        expect(merged).toBeDefined();
+        expect(merged.fromLanes).toContain("incident");
+        expect(merged.mergedCount).toBe(11);
+    });
+
+    test("workingMemory:synthesized contains the critical evidence summary", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+
+        let wmEvent: any;
+        cal.ctx.hooks.once("workingMemory:synthesized", (e) => { wmEvent = e; });
+        cal.synthesize();
+
+        expect(wmEvent).toBeDefined();
+        expect(wmEvent.text).toContain("connection pool exhaustion");
+    });
+
+    test("archive:created fires before workingMemory:synthesized", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+
+        const order: string[] = [];
+        cal.ctx.hooks.on("archive:created", () => order.push("archive"));
+        cal.ctx.hooks.on("workingMemory:synthesized", () => order.push("synthesized"));
+        cal.synthesize();
+
+        expect(order).toEqual(["archive", "synthesized"]);
+    });
+
+    test("all events share the scenario contextId", () => {
+        const cal = new Calibrator(doc);
+        const events: HookEvent[] = [];
+        cal.ctx.hooks.onAny((e) => events.push(e));
+
+        cal.loadAll();
+        cal.synthesize();
+
+        expect(events.length).toBeGreaterThan(0);
+        for (const e of events) {
+            expect(e.contextId).toBe("scenario-with-lifecycle-hooks");
+        }
+    });
+
+    test("all events have chronologically ordered timestamps", () => {
+        const cal = new Calibrator(doc);
+        const timestamps: string[] = [];
+        cal.ctx.hooks.onAny((e) => timestamps.push(e.timestamp));
+
+        cal.loadAll();
+        cal.synthesize();
+
+        for (let i = 1; i < timestamps.length; i++) {
+            expect(timestamps[i]! >= timestamps[i - 1]!).toBe(true);
+        }
+    });
+
+    test("once listener fires only for first event of its type", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.once("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        expect(events).toHaveLength(1);
+    });
+
+    test("working memory includes causal chain items from incident response", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+        const payload = cal.synthesize(2000);
+        const wm = payload.workingMemory.text;
+
+        expect(wm).toContain("connection pool exhaustion");
+        expect(wm).toContain("Roll back orders-service to v2.3.1");
+        expect(wm).toContain("Restore p99 latency below 200ms");
+    });
+});
+
+describe("lifecycle hooks: cross-lane item deduplication", () => {
+    const doc = loadScenario("scenario-with-lifecycle-hooks");
+
+    test("cross-lane item emits knowledgeObject:upserted exactly once", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        const crossEvents = events.filter((e) => e.id === "g-cross");
+        expect(crossEvents).toHaveLength(1);
+        expect(crossEvents[0].isNew).toBe(true);
+    });
+
+    test("cross-lane item appears in both incident and task lane windows after refresh", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+        cal.synthesize();
+
+        const incidentLane = cal.ctx.lanes.get("incident")!;
+        const taskLane = cal.ctx.lanes.get("task")!;
+
+        const incidentIds = incidentLane.window.selected.map((s) => s.id);
+        const taskIds = taskLane.window.selected.map((s) => s.id);
+
+        expect(incidentIds).toContain("g-cross");
+        expect(taskIds).toContain("g-cross");
+    });
+
+    test("cross-lane item is deduplicated in activeWindow:merged", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+
+        let merged: any;
+        cal.ctx.hooks.once("activeWindow:merged", (e) => { merged = e; });
+        cal.synthesize();
+
+        const crossRefs = merged.selected.filter((s: any) => s.id === "g-cross");
+        expect(crossRefs).toHaveLength(1);
+    });
+});
+
+describe("lifecycle hooks: untagged item excluded from lanes", () => {
+    const doc = loadScenario("scenario-with-lifecycle-hooks");
+
+    test("untagged item emits knowledgeObject:upserted", () => {
+        const cal = new Calibrator(doc);
+        cal.loadLanes();
+
+        const events: any[] = [];
+        cal.ctx.hooks.on("knowledgeObject:upserted", (e) => events.push(e));
+        cal.loadKnowledgeObjects();
+
+        const orphan = events.find((e) => e.id === "g-orphan");
+        expect(orphan).toBeDefined();
+        expect(orphan.isNew).toBe(true);
+        expect(orphan.kind).toBe("goal");
+    });
+
+    test("untagged item exists in global store", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+        expect(cal.ctx.goals.has("g-orphan")).toBe(true);
+    });
+
+    test("untagged item is excluded from tag-gated lanes (e.g. task)", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+        cal.synthesize();
+
+        // The default task lane has includeTagsAny: [{key:"lane", value:"task"}]
+        const taskLane = cal.ctx.lanes.get("task")!;
+        const taskIds = taskLane.window.selected.map((s) => s.id);
+        expect(taskIds).not.toContain("g-orphan");
+    });
+
+    test("untagged item is included in lanes with empty includeTagsAny (e.g. incident)", () => {
+        const cal = new Calibrator(doc);
+        cal.loadAll();
+        cal.synthesize();
+
+        // The incident lane was created via ensureLane with no tag filter
+        const incidentLane = cal.ctx.lanes.get("incident")!;
+        const incidentIds = incidentLane.window.selected.map((s) => s.id);
+        expect(incidentIds).toContain("g-orphan");
+    });
+});

@@ -1,0 +1,120 @@
+# Scenario: Production database outage response
+#
+# Causal chain (each item triggers the next):
+#
+#   e1 (evidence: alerting dashboard shows connection pool exhaustion)
+#     → a1 (assumption: a recent deployment introduced a connection leak)
+#       → q1 (question: which service version introduced the leak?)
+#         → e2 (evidence: git bisect identifies commit abc123 in orders-service)
+#           → d1 (decision: roll back orders-service to v2.3.1)
+#             → g1 (goal: restore p99 latency below 200ms within 30 minutes)
+#               → c1 (constraint: rollback must not drop in-flight transactions)
+#                 → e3 (evidence: canary confirms latency recovered post-rollback)
+#                   → d2 (decision: add connection pool health-check to CI pipeline)
+
+metaContext:
+  id: scenario-with-lifecycle-hooks
+
+lanes:
+  - id: incident
+    name: Incident Response Lane
+  - id: task
+    name: Task Lane
+
+evidence:
+  - id: e1
+    summary: Alerting dashboard shows connection pool exhaustion across 3 regions
+    severity: critical
+    confidence: high
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "1"
+  - id: e2
+    summary: Git bisect identifies commit abc123 in orders-service as leak source
+    severity: high
+    confidence: high
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "4"
+  - id: e3
+    summary: Canary deployment confirms p99 latency recovered to 140ms post-rollback
+    severity: low
+    confidence: high
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "8"
+
+assumptions:
+  - id: a1
+    statement: A recent deployment introduced a database connection leak
+    confidence: medium
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "2"
+
+questions:
+  - id: q1
+    question: Which service version introduced the connection leak?
+    priority: p0
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "3"
+
+decisions:
+  - id: d1
+    statement: Roll back orders-service to v2.3.1
+    rationale: Commit abc123 is confirmed leak source; rollback is fastest remediation
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "5"
+  - id: d2
+    statement: Add connection pool health-check to CI pipeline
+    rationale: Prevents future leaks from reaching production undetected
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "9"
+
+goals:
+  - id: g1
+    title: Restore p99 latency below 200ms within 30 minutes
+    priority: p0
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "6"
+  - id: g-cross
+    title: Write post-incident review document
+    priority: p1
+    tags:
+      - key: lane
+        value: incident
+      - key: lane
+        value: task
+  - id: g-orphan
+    title: Update onboarding guide for new hires
+    priority: p2
+
+constraints:
+  - id: c1
+    statement: Rollback must not drop in-flight transactions
+    priority: p0
+    tags:
+      - key: lane
+        value: incident
+      - key: causal-order
+        value: "7"
