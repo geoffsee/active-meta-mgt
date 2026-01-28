@@ -36,43 +36,40 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 /C????E.md
 
 # Example datasets (download via scripts/download-data.sh)
-example/data/mimic-iii/
-example/data/source/
-example/data/reference/
-example/data/patients.csv
-example/data/reference-ranges.json
+examples/VitalsWatch/server/data/mimic-iii/
+examples/VitalsWatch/server/data/source/
+examples/VitalsWatch/server/data/reference/
+examples/VitalsWatch/server/data/patients.csv
+examples/VitalsWatch/server/data/reference-ranges.json
 evaluations.jsonl
 # Keep READMEs
-!example/data/README.md
+!examples/VitalsWatch/server/data/README.md
 
 # Wrangler (Cloudflare Workers)
 .wrangler/
-/example/.dev.vars
-example/.playwright-mcp/
+examples/VitalsWatch/server/.dev.vars
+.playwright-mcp/
 
 # Fastlane artifacts
-example/wearable/fastlane/build_output/
-example/wearable/fastlane/report.xml
-example/wearable/fastlane/Preview.html
-example/wearable/fastlane/screenshots/
-example/wearable/fastlane/test_output/
-example/wearable/fastlane/*.ipa
-example/wearable/fastlane/*.dSYM.zip
-example/wearable/fastlane/AuthKey*.p8
-example/wearable/fastlane/.env
-example/wearable/fastlane/.env.local
-example/wearable/vendor/
-example/wearable/.bundle/
-example/wearable/Gemfile.lock
-/example/wearable/fastlane/*Key_*.*
-/example/wearable/fastlane/
-.playwright-mcp/
-/example/wearable/VitalsWatch/Assets.xcassets/AppIcon.appiconset/
-/example/wearable/VitalsWatch Watch App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
-/example/wearable/scripts/generate-app-icons.sh
-/example/wearable/AppStore_com.geoffsee.VitalsWatch.mobileprovision
-/example/wearable/scripts/
-/example/wearable/VitalsWatchUIScreenshots/SnapshotHelper.swift
-/example/wearable/VitalsWatchUIScreenshots/VitalsWatchScreenshots.swift
-/example/wearable/VitalsWatchUITests/VitalsWatchScreenshotTests.swift
-/example/TODO.md
+examples/VitalsWatch/client/fastlane/build_output/
+examples/VitalsWatch/client/fastlane/report.xml
+examples/VitalsWatch/client/fastlane/Preview.html
+examples/VitalsWatch/client/fastlane/screenshots/
+examples/VitalsWatch/client/fastlane/test_output/
+examples/VitalsWatch/client/fastlane/*.ipa
+examples/VitalsWatch/client/fastlane/*.dSYM.zip
+examples/VitalsWatch/client/fastlane/AuthKey*.p8
+examples/VitalsWatch/client/fastlane/.env
+examples/VitalsWatch/client/fastlane/.env.local
+examples/VitalsWatch/client/fastlane/*Key_*.*
+examples/VitalsWatch/client/fastlane/
+examples/VitalsWatch/client/vendor/
+examples/VitalsWatch/client/.bundle/
+examples/VitalsWatch/client/Gemfile.lock
+examples/VitalsWatch/client/VitalsWatch/Assets.xcassets/AppIcon.appiconset/
+examples/VitalsWatch/client/VitalsWatch Watch App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+examples/VitalsWatch/client/scripts/
+examples/VitalsWatch/client/VitalsWatchUIScreenshots/SnapshotHelper.swift
+examples/VitalsWatch/client/VitalsWatchUIScreenshots/VitalsWatchScreenshots.swift
+examples/VitalsWatch/client/VitalsWatchUITests/VitalsWatchScreenshotTests.swift
+/TODO.md
