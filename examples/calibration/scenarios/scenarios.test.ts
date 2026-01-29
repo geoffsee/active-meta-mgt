@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { Calibrator } from "../calibrator";
 import { parseScenario, type ScenarioDoc } from "../utils";
-import type { HookEvent } from "active-meta-mgt";
+import type { HookEvent } from "../../../index";
 
 function loadScenario(name: string): ScenarioDoc {
     const filePath = resolve(__dirname, `${name}.yaml`);

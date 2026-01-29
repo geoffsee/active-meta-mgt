@@ -2,7 +2,7 @@
 
 import {
     makeDefaultActiveMetaContext,
-} from "active-meta-mgt";
+} from "../../index";
 import { yamlToJson } from "./yaml2json";
 
 /** Describes a calibration scenario parsed from a YAML document. */
