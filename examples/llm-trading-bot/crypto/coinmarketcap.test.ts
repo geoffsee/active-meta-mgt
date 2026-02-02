@@ -3,7 +3,7 @@ import { getAlpacaSymbolSet, fetchAndUpsertCMCData, fetchCryptoQuotes, fetchGlob
 import { storage } from "./storage.ts";
 
 beforeEach(async () => {
-  await storage.clear();
+  try { await storage.clear(); } catch {}
 });
 
 describe("getAlpacaSymbolSet", () => {

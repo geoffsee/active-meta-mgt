@@ -12,7 +12,7 @@ const baseDeps = {
 };
 
 beforeEach(async () => {
-  await storage.clear();
+  try { await storage.clear(); } catch {}
 });
 
 describe("executeDecision", () => {

@@ -8,7 +8,7 @@ import {
 } from "./storage.ts";
 
 beforeEach(async () => {
-  await storage.clear();
+  try { await storage.clear(); } catch {}
 });
 
 describe("getJSON / setJSON", () => {
@@ -85,7 +85,7 @@ describe("round-trip tracking", () => {
   });
 
   it("getCompletedTrades returns history", async () => {
-    await storage.clear();
+    try { await storage.clear(); } catch {}
     await recordBuyEntry("A/USD", 100);
     await recordSellExit("A/USD", 120);
     await recordBuyEntry("B/USD", 200);
