@@ -51,7 +51,8 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "dotenv": "^16.4.5"
   },
   "prettier": {
     "semi": true,
