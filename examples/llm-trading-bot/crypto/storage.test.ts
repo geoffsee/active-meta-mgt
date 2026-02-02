@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   storage, getJSON, setJSON,
   appendDecisionLog, getDecisionLog,
@@ -85,6 +85,7 @@ describe("round-trip tracking", () => {
   });
 
   it("getCompletedTrades returns history", async () => {
+    await storage.clear();
     await recordBuyEntry("A/USD", 100);
     await recordSellExit("A/USD", 120);
     await recordBuyEntry("B/USD", 200);

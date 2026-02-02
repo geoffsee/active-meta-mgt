@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { sleep, dayKeyET, isRTH_ET, clampInt, round2, daysTo } from "./time.ts";
 
 describe("sleep", () => {

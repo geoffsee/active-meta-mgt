@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { openai, perigon, traderContext } from "./clients.ts";
 
 describe("clients", () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { getAlpacaSymbolSet, fetchAndUpsertCMCData, fetchCryptoQuotes, fetchGlobalMetrics, fetchTrending } from "./coinmarketcap.ts";
 import { storage } from "./storage.ts";
 
@@ -46,7 +46,7 @@ describe("fetchAndUpsertCMCData", () => {
       { id: "2", symbol: "ETH/USD", name: "Ethereum", status: "active", tradable: true },
     ];
 
-    const mockFetch = mock((url: string) => {
+    const mockFetch = vi.fn((url: string) => {
       if (url.includes("quotes/latest?symbol=")) {
         expect(url).toContain("BTC");
         expect(url).toContain("ETH");
@@ -88,7 +88,7 @@ describe("fetchAndUpsertCMCData", () => {
   });
 
   it("skips when no Alpaca assets available", async () => {
-    const mockFetch = mock(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })) as any;
+    const mockFetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })) as any;
     await fetchAndUpsertCMCData({ fetchFn: mockFetch, getAssets: async () => [] });
     expect(mockFetch).not.toHaveBeenCalled();
   });

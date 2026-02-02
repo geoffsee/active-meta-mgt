@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { fetchAndUpsertNews } from "./news.ts";
 
 // news.ts imports perigon from clients.ts which is constructed at module load.

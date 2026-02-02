@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { config, keys, requireEnv, ALPACA_TRADING_BASE, ALPACA_CRYPTO_DATA_BASE } from "./config.ts";
 
 describe("config", () => {

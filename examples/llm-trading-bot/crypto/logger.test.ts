@@ -1,4 +1,4 @@
-import { describe, it, expect, jest } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import { createLogger, colors, rootLogger, type Logger } from "./logger.ts";
 
 describe("createLogger", () => {
@@ -11,7 +11,7 @@ describe("createLogger", () => {
   });
 
   it("info logs include the scope and message", () => {
-    const spy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     const log = createLogger("my-scope");
     log.info("hello world");
     expect(spy).toHaveBeenCalledTimes(1);
@@ -23,7 +23,7 @@ describe("createLogger", () => {
   });
 
   it("warn logs to console.warn", () => {
-    const spy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const log = createLogger("w");
     log.warn("caution");
     expect(spy).toHaveBeenCalledTimes(1);
@@ -32,7 +32,7 @@ describe("createLogger", () => {
   });
 
   it("error logs to console.error", () => {
-    const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const log = createLogger("e");
     log.error("fail");
     expect(spy).toHaveBeenCalledTimes(1);
@@ -51,7 +51,7 @@ describe("colors", () => {
 
 describe("rootLogger", () => {
   it("is a Logger with scope 'app'", () => {
-    const spy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     rootLogger.info("root test");
     expect(spy).toHaveBeenCalledTimes(1);
     expect((spy.mock.calls[0]![0] as string)).toContain("app");

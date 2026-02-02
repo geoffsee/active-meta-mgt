@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import { runOnce } from "./main.ts";
 import { createTradingState } from "./trading.ts";
 import type { Decision } from "./decision.ts";
@@ -7,16 +7,16 @@ describe("runOnce", () => {
   it("invokes fetchNews, fetchCMCData, fetchTA, decide, execute, reportPerformance in order", async () => {
     const calls: string[] = [];
     const deps = {
-      fetchNews: mock(async () => { calls.push("fetchNews"); }),
-      fetchCMCData: mock(async () => { calls.push("fetchCMCData"); }),
-      fetchTA: mock(async () => { calls.push("fetchTA"); }),
-      reportPerformance: mock(async () => { calls.push("reportPerformance"); }),
-      decide: mock(async () => {
+      fetchNews: vi.fn(async () => { calls.push("fetchNews"); }),
+      fetchCMCData: vi.fn(async () => { calls.push("fetchCMCData"); }),
+      fetchTA: vi.fn(async () => { calls.push("fetchTA"); }),
+      reportPerformance: vi.fn(async () => { calls.push("reportPerformance"); }),
+      decide: vi.fn(async () => {
         calls.push("decide");
         return { action: "hold", ticker: "BTC/USD", size_usd: 0, confidence: 1, rationale: "" } as Decision;
       }),
-      execute: mock(async (_d: Decision) => { calls.push("execute"); }),
-      logger: mock(() => {}),
+      execute: vi.fn(async (_d: Decision) => { calls.push("execute"); }),
+      logger: vi.fn(() => {}),
     };
 
     await runOnce(deps, createTradingState());
@@ -33,7 +33,7 @@ describe("runOnce", () => {
   });
 
   it("handles null decision gracefully", async () => {
-    const executeMock = mock(async () => {});
+    const executeMock = vi.fn(async () => {});
     await runOnce({
       fetchNews: async () => {},
       fetchCMCData: async () => {},

@@ -1,14 +1,14 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { executeDecision, createTradingState, loadTradingState, saveTradingState } from "./trading.ts";
 import { config } from "./config.ts";
 import { storage } from "./storage.ts";
 
 const baseDeps = {
-  getCryptoPositions: mock(() => Promise.resolve([{ symbol: "BTCUSD", qty: "0.1", asset_class: "crypto", market_value: "5000" }])),
-  placeCryptoMarketBuy: mock(() => Promise.resolve({ id: "buy123" })),
-  placeCryptoMarketSell: mock(() => Promise.resolve({ id: "sell123" })),
+  getCryptoPositions: vi.fn(() => Promise.resolve([{ symbol: "BTCUSD", qty: "0.1", asset_class: "crypto", market_value: "5000" }])),
+  placeCryptoMarketBuy: vi.fn(() => Promise.resolve({ id: "buy123" })),
+  placeCryptoMarketSell: vi.fn(() => Promise.resolve({ id: "sell123" })),
   now: () => 0,
-  logger: { info: mock(() => {}), error: mock(() => {}), debug: mock(() => {}), warn: mock(() => {}) },
+  logger: { info: vi.fn(() => {}), error: vi.fn(() => {}), debug: vi.fn(() => {}), warn: vi.fn(() => {}) },
 };
 
 beforeEach(async () => {
@@ -32,7 +32,7 @@ describe("executeDecision", () => {
     state.lastTradeAt = -config.COOLDOWN_MS;
     const result = await executeDecision(
       { action: "buy", ticker: "BTC/USD", confidence: 0.9, size_usd: 500, rationale: "" },
-      { ...baseDeps, getCryptoPositions: mock(() => Promise.resolve([])) },
+      { ...baseDeps, getCryptoPositions: vi.fn(() => Promise.resolve([])) },
       state,
     );
     expect(result.status).toBe("buy_placed");
@@ -66,7 +66,7 @@ describe("executeDecision", () => {
     state.lastTradeAt = -config.COOLDOWN_MS;
     const result = await executeDecision(
       { action: "buy", ticker: "BTC/USD", confidence: 0.9, size_usd: 1000, rationale: "" },
-      { ...baseDeps, getCryptoPositions: mock(() => Promise.resolve([{ symbol: "BTCUSD", qty: "0.1", asset_class: "crypto", market_value: "5000" }])) },
+      { ...baseDeps, getCryptoPositions: vi.fn(() => Promise.resolve([{ symbol: "BTCUSD", qty: "0.1", asset_class: "crypto", market_value: "5000" }])) },
       state,
     );
     expect(result.status).toBe("max_position");
@@ -81,7 +81,7 @@ describe("executeDecision", () => {
     state.tradeDayKey = dayKeyET(new Date(0));
     const result = await executeDecision(
       { action: "buy", ticker: "BTC/USD", confidence: 0.9, size_usd: 500, rationale: "" },
-      { ...baseDeps, getCryptoPositions: mock(() => Promise.resolve([])) },
+      { ...baseDeps, getCryptoPositions: vi.fn(() => Promise.resolve([])) },
       state,
     );
     expect(result.status).toBe("daily_limit");
@@ -127,8 +127,8 @@ describe("executeDecision", () => {
       { action: "buy", ticker: "BTC/USD", confidence: 0.9, size_usd: 500, rationale: "" },
       {
         ...baseDeps,
-        getCryptoPositions: mock(() => Promise.resolve([])),
-        placeCryptoMarketBuy: mock(() => { throw new Error("exchange down"); }),
+        getCryptoPositions: vi.fn(() => Promise.resolve([])),
+        placeCryptoMarketBuy: vi.fn(() => { throw new Error("exchange down"); }),
       },
       state,
     );
@@ -142,8 +142,8 @@ describe("executeDecision", () => {
       { action: "buy", ticker: "BTC/USD", confidence: 0.9, size_usd: 500, rationale: "" },
       {
         ...baseDeps,
-        getCryptoPositions: mock(() => Promise.resolve([])),
-        placeCryptoMarketBuy: mock(() => { throw new Error("integer qty required"); }),
+        getCryptoPositions: vi.fn(() => Promise.resolve([])),
+        placeCryptoMarketBuy: vi.fn(() => { throw new Error("integer qty required"); }),
       },
       state,
     );

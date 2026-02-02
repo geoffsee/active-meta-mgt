@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { getCryptoQuote, getCryptoPositions, getAccount } from "./alpaca.ts";
 
 // These functions hit the real Alpaca API with test keys, so they'll fail gracefully.

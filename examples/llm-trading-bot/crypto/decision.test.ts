@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import { synthesizeAndDecide, isValidDecision } from "./decision.ts";
 import type { Decision } from "./decision.ts";
 import { config } from "./config.ts";
@@ -7,7 +7,7 @@ function mockOpenAi(decision: Decision) {
   return {
     chat: {
       completions: {
-        create: mock(() => ({
+        create: vi.fn(() => ({
           choices: [{ message: { content: JSON.stringify(decision) } }],
         } as any)),
       },
@@ -17,12 +17,12 @@ function mockOpenAi(decision: Decision) {
 
 const baseDeps = {
   context: {
-    synthesizeFromLanes: mock(() => Promise.resolve()),
-    buildLLMContextPayload: mock(() => ({ workingMemory: { text: "ctx" } })),
+    synthesizeFromLanes: vi.fn(() => Promise.resolve()),
+    buildLLMContextPayload: vi.fn(() => ({ workingMemory: { text: "ctx" } })),
   },
-  getCryptoQuoteFn: mock(() => Promise.resolve({ bid: 50000, ask: 50100, mid: 50050 })),
-  getCryptoPositionsFn: mock(() => Promise.resolve([])),
-  getAlpacaSymbolsFn: mock(() => Promise.resolve(new Set(["BTC", "ETH"]))),
+  getCryptoQuoteFn: vi.fn(() => Promise.resolve({ bid: 50000, ask: 50100, mid: 50050 })),
+  getCryptoPositionsFn: vi.fn(() => Promise.resolve([])),
+  getAlpacaSymbolsFn: vi.fn(() => Promise.resolve(new Set(["BTC", "ETH"]))),
 };
 
 describe("isValidDecision", () => {
@@ -83,7 +83,7 @@ describe("synthesizeAndDecide", () => {
     const decision = await synthesizeAndDecide({
       ...baseDeps,
       openaiClient: {
-        chat: { completions: { create: mock(() => ({ choices: [{ message: { content: "not json" } }] })) } },
+        chat: { completions: { create: vi.fn(() => ({ choices: [{ message: { content: "not json" } }] })) } },
       },
     });
     expect(decision?.action).toBe("hold");
@@ -100,7 +100,7 @@ describe("synthesizeAndDecide", () => {
   it("returns null on synthesis error", async () => {
     const decision = await synthesizeAndDecide({
       ...baseDeps,
-      context: { synthesizeFromLanes: mock(() => { throw new Error("boom"); }), buildLLMContextPayload: mock(() => ({})) },
+      context: { synthesizeFromLanes: vi.fn(() => { throw new Error("boom"); }), buildLLMContextPayload: vi.fn(() => ({})) },
       openaiClient: mockOpenAi({ action: "buy", ticker: "BTC/USD", confidence: 0.9, size_usd: 500, rationale: "x" }),
     });
     expect(decision).toBeNull();
@@ -116,12 +116,12 @@ describe("synthesizeAndDecide", () => {
   });
 
   it("includes positions in LLM prompt", async () => {
-    const createSpy = mock(() => ({
+    const createSpy = vi.fn(() => ({
       choices: [{ message: { content: JSON.stringify({ action: "hold", ticker: "BTC/USD", confidence: 0.9, size_usd: 0, rationale: "ok" }) } }],
     }));
     await synthesizeAndDecide({
       ...baseDeps,
-      getCryptoPositionsFn: mock(() => Promise.resolve([
+      getCryptoPositionsFn: vi.fn(() => Promise.resolve([
         { symbol: "BCHUSD", qty: "10", asset_class: "crypto", market_value: "5000" },
       ])),
       openaiClient: { chat: { completions: { create: createSpy } } },
