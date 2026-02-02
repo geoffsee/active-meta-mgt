@@ -1,5 +1,7 @@
 # Active Meta-Context Example
 
+> **Note:** This example has not been updated to use the new lifecycle methods (e.g., `synthesizeFromLanes`, lifecycle hooks, `scenario-with-lifecycle-hooks` patterns). It still uses the older manual lane refresh and merge workflow. Contributions welcome.
+
 Runnable Bun server that demonstrates how `active-meta-mgt` seeds lanes, synthesizes working memory, and calls the OpenAI SDK using clinical scenarios generated from real patient data.
 
 ## Data Sources

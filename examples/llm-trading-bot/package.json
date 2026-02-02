@@ -1,0 +1,24 @@
+{
+  "name": "active-trader",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "@goperigon/perigon-ts": "^2.5.0",
+    "active-meta-mgt": "^0.1.7",
+    "dotenv": "^16.4.5",
+    "openai": "^4.77.4",
+    "unstorage": "^1.17.4"
+  },
+  "scripts": {
+    "start:crypto": "bun run crypto/index.ts",
+    "build": "bun build index.ts --outdir dist",
+    "test": "bun test"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
