@@ -13,7 +13,9 @@
     "deploy": "wrangler deploy",
     "cf:kv:create": "wrangler kv:namespace create PATIENTS_KV && wrangler kv:namespace create PATIENTS_KV --preview",
     "cf:secret:set": "wrangler secret put OPENAI_API_KEY",
-    "fmt": "bunx prettier -w ."
+    "fmt": "bunx prettier -w .",
+    "client:dev": "cd ../web-client && bun run dev",
+    "client:build": "cd ../web-client && bun run build"
   },
   "prettier": {
     "semi": true,

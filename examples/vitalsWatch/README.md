@@ -33,20 +33,67 @@ examples/vitalsWatch/client/
 │   ├── VitalsWatchApp.swift        # iOS app entry
 │   ├── ContentView.swift           # Configuration display
 │   └── Info.plist
-├── Shared/                         # Shared code (both targets)
-│   ├── Config.swift                # Case credentials, API settings
-│   └── VitalTypes.swift            # Data models
+├── client/                         # watchOS & iOS client app
+├── web-client/                     # React web dashboard
+├── server/                         # Clinical decision support server
+│   ├── src/
+│   │   ├── server.ts               # Main server with API and static serving
+│   │   └── ...
+│   └── public/                     # Static files (built from web-client)
 └── README.md
 ```
 
+## Web Client (Evaluation Dashboard)
+
+The project includes a modern React-based web dashboard for clinicians to review patient cases, monitor vitals, and perform multi-specialist evaluations.
+
+### Features:
+- **Case Management**: Browse and select from imported patient cases.
+- **Vitals Monitoring**: View real-time vitals, lab results, and medications.
+- **Multi-Specialist Evaluation**: Trigger and review clinical evaluations from multiple AI specialists.
+- **Structured Findings**: Detailed view of clinical findings, conflicts, and follow-up actions.
+
+### Development:
+```bash
+cd examples/vitalsWatch/web-client
+bun install
+bun run dev
+```
+
+### Build & Deploy to Server:
+```bash
+cd examples/vitalsWatch/server
+bun run client:build
+```
+This builds the React app and copies it to the server's `public/` directory.
+
+## Backend Features
+- **Multi-Specialist Evaluation**: Integrated with AI specialists for clinical decision support.
+- **Data Ingestion**: Secure API for ingesting patient data and vitals.
+- **HealthKit Alignment**: Automatically aligns incoming HealthKit data with clinical records.
+
 ## Setup Instructions
 
-### 1. Import a Patient Case
+### 1. Start the Server
+```bash
+cd examples/vitalsWatch/server
+bun install
+bun run dev
+```
+
+### 2. Build the Web Client
+To serve the dashboard from the server's root URL:
+```bash
+cd examples/vitalsWatch/server
+bun run client:build
+```
+
+### 3. Import a Patient Case
 
 First, import a case to get credentials:
 
 ```bash
-curl -X POST http://localhost:3333/api/import \
+curl -X POST http://localhost:3000/api/import \
   -H "Content-Type: application/json" \
   -d '{
     "content": "{\"patient_id\": \"P001\", \"age\": 65, \"gender\": \"M\", \"diagnosis\": \"CHF\"}"
@@ -110,7 +157,7 @@ struct Config {
     static let password = "aB3dEf9Gh1Jk"  // Your actual password
 
     // Server URL
-    static let apiBaseURL = "http://localhost:3333"
+    static let apiBaseURL = "http://localhost:3000"
 }
 ```
 
@@ -209,20 +256,24 @@ The watchOS simulator doesn't have real HealthKit data, but you can:
 
 ### Verify Server Integration
 
-1. Start the example server:
+1. Start the example server and ensure the web client is built:
    ```bash
-   cd examples/VitalsWatch/server
-   bun run src/server.ts
+   cd examples/vitalsWatch/server
+   bun run client:build
+   bun run dev
    ```
 
-2. Check ingestion log after submission:
+2. Open the Evaluation Dashboard in your browser:
+   `http://localhost:3000`
+
+3. Check ingestion log after submission:
    ```bash
-   curl http://localhost:3333/api/ingest/log
+   curl http://localhost:3000/api/ingest/log
    ```
 
-3. Verify patient data:
+4. Verify patient data:
    ```bash
-   curl http://localhost:3333/api/ingest/patients
+   curl http://localhost:3000/api/ingest/patients
    ```
 
 ## API Authentication
@@ -288,7 +339,7 @@ The app gracefully falls back to manual entry only. Users can re-enable in Setti
 ### "Cannot connect to server"
 - Verify the server is running
 - Check `Config.apiBaseURL` matches your server
-- For simulators connecting to localhost, use `http://localhost:3333`
+- For simulators connecting to localhost, use `http://localhost:3000`
 - For physical devices, ensure the server is accessible on the network
 
 ## Security Notes

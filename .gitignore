@@ -73,3 +73,4 @@ examples/VitalsWatch/client/VitalsWatchUIScreenshots/SnapshotHelper.swift
 examples/VitalsWatch/client/VitalsWatchUIScreenshots/VitalsWatchScreenshots.swift
 examples/VitalsWatch/client/VitalsWatchUITests/VitalsWatchScreenshotTests.swift
 /TODO.md
+/examples/vitalsWatch/server/public/assets
